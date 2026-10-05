@@ -136,7 +136,7 @@ Pydantic models for API domain objects, split per domain (`alarm.py`, `lock.py`,
 - `LockFeatures` — Lock features (holdBackLatchTime, calibrationType, autolock)
 - `LockAutolock` — Autolock settings (active, timeout)
 
-**Alarm state types** (also in `models.py`):
+**Alarm state types** (in `models/alarm.py`):
 
 - `InteriorMode` — StrEnum: off, day, night, total
 - `PerimeterMode` — StrEnum: off, on
@@ -151,7 +151,7 @@ Pydantic models for API domain objects, split per domain (`alarm.py`, `lock.py`,
 
 ### GraphQL queries (`graphql_queries.py`)
 
-All GraphQL query and mutation strings are extracted into `graphql_queries.py`, keeping `client.py` focused on business logic. This module contains named constants for each operation (e.g. `VALIDATE_DEVICE_MUTATION`, `REFRESH_LOGIN_MUTATION`, `ARM_PANEL_MUTATION`, etc.) that `VerisureOwaClient` imports and passes to `_execute_graphql()`.
+All GraphQL query and mutation strings are extracted into `graphql_queries.py`, keeping the `client/` modules focused on business logic. This module contains named constants for each operation (e.g. `VALIDATE_DEVICE_MUTATION`, `REFRESH_LOGIN_MUTATION`, `ARM_PANEL_MUTATION`, etc.) that `VerisureOwaClient` imports and passes to `_execute_graphql()`.
 
 ### Log sanitization (`log_filter.py`)
 
@@ -174,7 +174,7 @@ All debug log messages use context prefixes for easy filtering:
 | Prefix | Layer | Example |
 |--------|-------|---------|
 | `response=` | HTTP (`http_transport.py`) | Sanitized JSON response |
-| `[auth]` | Client (`client.py`) | Token refresh, re-authentication, capabilities checks |
+| `[auth]` | Client (`client/_base.py`) | Token refresh, re-authentication, capabilities checks |
 | `[queue]` | Queue (`api_queue.py`) | Throttle delays and priority preemption |
 | `[setup]` | Setup (`__init__.py`) | Card resource registration, entry migration |
 | `[camera_discovery]` | Setup (`__init__.py`) | Camera device discovery and entity creation |
@@ -184,7 +184,7 @@ All debug log messages use context prefixes for easy filtering:
 
 `ApiDomains` maps country codes to API URLs and language codes. Supported countries: ES, FR, GB, IE, IT, BR, CL, AR, PT. Countries without an explicit entry fall back to a URL template using the country code as a subdomain.
 
-### Alarm states and commands (`const.py`, `models.py`)
+### Alarm states and commands (`const.py`, `models/alarm.py`)
 
 Verisure alarms have up to three independent axes: **interior mode** (disarmed, partial day, partial night, total), **perimeter** (on or off), and **annex** (on or off). Most installations only use the interior axis ± perimeter; the annex axis is used by some UK Vatrinus installations. The combination of interior × perimeter alone produces these 8 states:
 
@@ -203,7 +203,7 @@ Most compound commands (`ARMDAY1PERI1`, `ARM1PERI1`) are accepted by all known p
 
 **Panel-specific `DARM1` behavior:** On SDVFAST (Spain), `DARM1` disarms everything (interior + perimeter). On SDVECU (Italy), `DARM1` only disarms the interior — `DARMPERI` disarms only the perimeter, and `DARM1DARMPERI` disarms both. This difference is safe because the `DARM1` fallback only triggers on panels that reject `DARM1DARMPERI` (i.e. SDVFAST, where `DARM1` disarms everything).
 
-Two mapping tables in `models.py` connect these:
+Two mapping tables in `models/alarm.py` connect these:
 - `PROTO_TO_STATE` — `ProtoCode` to `AlarmState` (e.g. `ProtoCode.TOTAL` -> `AlarmState(TOTAL, OFF)`)
 - `STATE_TO_COMMAND` — `AlarmState` to `ArmCommand` (e.g. `AlarmState(TOTAL, OFF)` -> `ArmCommand.ARM_TOTAL`)
 
@@ -1071,38 +1071,54 @@ Tests are organized by module, with a shared `conftest.py` providing fixtures an
 
 ```
 tests/
-├── conftest.py              Shared fixtures (API client, JWT helpers, response factories)
-├── mock_graphql.py          Mock HTTP transport for integration tests (see below)
-├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
-├── test_api_queue.py        ApiQueue priority, throttling, arrival order, cancellation
-├── test_architecture.py     Structural tests (imports, file existence, module patterns)
-├── test_auth.py             Login, refresh, 2FA, token lifecycle (HA-level)
-├── test_binary_sensor.py    WiFi connection binary sensor (coordinator-driven)
-├── test_button.py           Refresh button entity, capture button, 403 WAF notification
-├── test_camera_api.py       Camera API operations: discover, capture, thumbnails
-├── test_camera_platform.py  Camera entity platform setup and image serving
-├── test_client_alarm.py     VerisureOwaClient alarm operations: arm, disarm, check_alarm, polling
-├── test_client_auth.py      VerisureOwaClient auth lifecycle: login, refresh, 2FA, logout
-├── test_client_camera.py    VerisureOwaClient camera operations: capture, thumbnail, full image
-├── test_client_lock.py      VerisureOwaClient lock operations: get_modes, change_mode, config
-├── test_client_misc.py      VerisureOwaClient misc: sentinel, air quality, services, installations
-├── test_command_resolver.py CommandResolver state transitions, fallback chains
-├── test_config_flow.py      Config flow (setup + 2FA + reauth/Reconfigure) and options flow
-├── test_constants.py        SENTINEL_SERVICE_NAMES, VerisureOwaState enum, mapping tables
-├── test_coordinators.py     DataUpdateCoordinators: alarm, sentinel, lock, camera
-├── test_domains.py          Country-to-URL routing
-├── test_exceptions.py       Exception hierarchy, message, log_detail, response_body
-├── test_execute_request.py  HttpTransport request execution, retries, error handling
-├── test_ha_platforms.py     Platform async_setup_entry for all entity types
-├── test_helpers.py          DRY helpers: _poll_operation (409 retry, transient errors)
-├── test_http_transport.py   HttpTransport: POST, retries, WAF detection, JSON parsing
-├── test_hub.py              VerisureHub: camera management, lock management, queue
-├── test_init.py             Integration setup, session sharing, background discovery
-├── test_integration.py      Integration tests using MockGraphQLServer (see below)
-├── test_log_filter.py       SensitiveDataFilter: secret redaction, installation masking
-├── test_models.py           Pydantic domain models: null coercion, field mapping, enums
-├── test_responses.py        Pydantic response envelopes: validation, null safety
-└── test_services.py         Service discovery, Sentinel, air quality, smart lock service requests
+├── conftest.py                     Shared fixtures (API client, JWT helpers, response factories)
+├── mock_graphql.py                 Mock GraphQL server for integration tests (see below)
+├── fixtures/                       Sanitised API responses and capability JWTs used by the tests
+├── test_alarm_panel.py             Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
+├── test_api_queue.py               ApiQueue priority, throttling, arrival order, cancellation
+├── test_architecture.py            Type-hint rules for the code (no bare dict, no blanket type: ignore, Any baseline)
+├── test_auth.py                    VerisureOwaClient login, refresh, 2FA, token lifecycle
+├── test_binary_sensor.py           WiFi connection binary sensor (coordinator-driven)
+├── test_button.py                  Refresh button entity, capture button, 403 WAF notification
+├── test_camera_api.py              Camera dataclasses and camera utility functions
+├── test_camera_platform.py         Camera entity platform setup and image serving
+├── test_capabilities.py            Capability JWT decoding and detection helpers
+├── test_card_cache_busting.py      Card modules' relative imports carry the imported file's content stamp
+├── test_client_activity.py         VerisureOwaClient activity timeline (xSActV2)
+├── test_client_alarm.py            VerisureOwaClient alarm operations: arm, disarm, check_alarm, polling
+├── test_client_auth.py             VerisureOwaClient auth lifecycle, typed execute, polling, headers
+├── test_client_camera.py           VerisureOwaClient camera operations: capture, thumbnail, full image
+├── test_client_lock.py             VerisureOwaClient lock operations: get_modes, change_mode, config
+├── test_client_misc.py             VerisureOwaClient sentinel, air quality, installations and services
+├── test_command_resolver.py        CommandResolver state transitions, fallback chains
+├── test_config_flow.py             Config flow (setup + 2FA + reauth/Reconfigure) and options flow
+├── test_constants.py               SENTINEL_SERVICE_NAMES, VerisureOwaState enum, mapping tables
+├── test_coordinators.py            DataUpdateCoordinators: alarm, sentinel, lock, camera
+├── test_deprecated_card_log.py     Deprecated card, badge and chip log one warning per element and dashboard
+├── test_domains.py                 Country-to-URL and language routing
+├── test_entity.py                  Shared entity helpers in entity.py
+├── test_event.py                   Activity `event` entity
+├── test_events.py                  Activity-timeline event-bus helper
+├── test_exceptions.py              Exception hierarchy, message, log_detail, response_body
+├── test_execute_request.py         generate_uuid helper
+├── test_ha_platforms.py            Sensor and lock entities
+├── test_helpers.py                 VerisureOwaClient helpers: token decoding, response data extraction
+├── test_http_transport.py          HttpTransport: POST, retries, WAF detection, JSON parsing
+├── test_hub.py                     VerisureHub: camera management, lock management, queue
+├── test_humanize_panel_error.py    Turning the panel's raw error codes into readable notification text
+├── test_init.py                    Integration setup, session sharing, background discovery
+├── test_integration.py             Integration tests using MockGraphQLServer (see below)
+├── test_ipv4_first.py              Connecting over IPv4 first, with a fallback (#606)
+├── test_log_filter.py              SensitiveDataFilter: secret redaction, installation masking
+├── test_markers.py                 Which test files get the `integration` marker
+├── test_migrate_unique_ids.py      Rewriting pre-v5 entity unique_ids to the v5.0.2 form
+├── test_models.py                  Pydantic domain models: null coercion, field mapping, enums
+├── test_orphan_directory_repair.py Repairs issue for a leftover custom_components/verisure_owa/ folder
+├── test_pin_crypto.py              PIN hashing and verification
+├── test_refresh_crash_behaviour.py Client handling of the xSRefreshLogin crash (#557)
+├── test_refresh_diagnostics.py     Logging that tells apart the causes of the #557 crash
+├── test_responses.py               Pydantic response envelopes: validation, null safety
+└── test_services.py                VerisureOwaClient installation list and service catalog requests
 ```
 
 ### Key fixtures (`conftest.py`)
@@ -1215,34 +1231,62 @@ alongside it under `.github/workflows/`.
 
 ## File reference
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `__init__.py` | 2040 | Integration setup functions, session sharing, background discovery, coordinator creation, card resource registration |
-| `hub.py` | 729 | `VerisureHub` (central hub wrapping VerisureOwaClient), `VerisureDevice` (device registry wrapper) |
-| `entity.py` | 96 | `VerisureEntity` base class, `verisure_device_info()`, `camera_device_info()` |
-| `coordinators.py` | 429 | `AlarmCoordinator`, `SentinelCoordinator`, `LockCoordinator`, `CameraCoordinator` |
-| `config_flow.py` | 1682 | Config flow (setup + 2FA + reauth/Reconfigure + installation picker) and options flow (settings + mappings) |
-| `alarm_control_panel.py` | 840 | Alarm entity (CoordinatorEntity) with state mapping, arm/disarm, force arm, PIN validation, WAF tracking |
-| `sensor.py` | 185 | Sentinel temperature, humidity, air quality sensors (CoordinatorEntity) |
-| `binary_sensor.py` | 63 | WiFi connection status diagnostic sensor (CoordinatorEntity, no polling) |
-| `lock.py` | 345 | Multi-lock entity (CoordinatorEntity) with lock feature attributes |
-| `camera.py` | 166 | Camera entities: VerisureCamera (thumbnail), VerisureCameraFull (full image), both CoordinatorEntity |
-| `button.py` | 152 | Refresh button with WAF notification, capture button |
-| `api_queue.py` | 125 | Priority-based rate-limited API queue (FOREGROUND/BACKGROUND) |
-| `const.py` | 58 | Integration constants, signal names, config keys, platform list, card URLs, `SENTINEL_SERVICE_NAMES` |
-| `log_filter.py` | 86 | `SensitiveDataFilter` -- log sanitization for secrets |
-| `pin_crypto.py` | 56 | `hash_pin`/`verify_pin` -- PBKDF2-HMAC-SHA256 hashing for the local alarm/lock PIN |
-| `verisure_owa_api/client.py` | 1764 | `VerisureOwaClient` -- auth lifecycle, typed GraphQL execution, all business operations |
-| `verisure_owa_api/http_transport.py` | 154 | `HttpTransport` -- raw HTTP POST with retries, WAF detection, JSON parsing |
-| `verisure_owa_api/graphql_queries.py` | 265 | GraphQL query and mutation string constants |
-| `verisure_owa_api/command_resolver.py` | 182 | `CommandResolver`, `AlarmState`, `CommandStep` -- state transition logic |
-| `verisure_owa_api/models.py` | 375 | Pydantic domain models (Installation, OperationStatus, SmartLock, CameraDevice, Sentinel, etc.) |
-| `verisure_owa_api/responses.py` | 517 | Pydantic response envelopes for every GraphQL operation |
-| `verisure_owa_api/const.py` | 107 | `VerisureOwaState`, command/protocol mappings, defaults |
-| `verisure_owa_api/domains.py` | 50 | Country-to-URL routing |
-| `verisure_owa_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
-| `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. **Deprecated since v5.8.0**, together with the badge and Mushroom chip in `www/verisure-owa-alarm-chip.js`: the card shows a notice the user can close, and each of the three reports itself once per element instance over the `verisure_owa/deprecated_element` websocket command, which `card_resources.py` registers from `async_setup` and which logs one warning per element and dashboard until Home Assistant restarts. (Filename `securitas-alarm-card.js` is a byte-identical copy retained indefinitely as an alias served at the `/securitas_panel/` URL prefix so old user dashboards keep loading; the card picker only offers the `custom:verisure-owa-alarm-card` form.) |
-| `www/verisure-owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
-| `www/verisure-owa-activity-log-card.js` | — | Custom Lovelace **Activity Log** card showing recent alarm-panel activity. |
+Paths are relative to `custom_components/securitas/`.
+
+| File | Purpose |
+|------|---------|
+| `__init__.py` | Integration setup functions, session sharing, coordinator creation, card registration, service registration, Repairs issues |
+| `hub.py` | `VerisureHub` (central hub wrapping VerisureOwaClient), `VerisureDevice` (device registry wrapper) |
+| `entity.py` | `VerisureEntity` base class, `verisure_device_info()`, `camera_device_info()` |
+| `coordinators.py` | `AlarmCoordinator`, `SentinelCoordinator`, `LockCoordinator`, `CameraCoordinator`, activity coordinator |
+| `discovery.py` | Background discovery of cameras and locks |
+| `config_flow.py` | Config flow (setup + 2FA + reauth/Reconfigure + installation picker) and options flow (settings + mappings) |
+| `card_resources.py` | Helpers that add and remove the cards' Lovelace resources, and the `verisure_owa/deprecated_element` websocket command |
+| `alarm_control_panel/__init__.py` | Platform setup and the alarm entity services (`force_arm`, `force_arm_cancel`, `suppress_arm_exception_prompt`) |
+| `alarm_control_panel/_base.py` | `BaseVerisureOwaAlarmPanel`: coordinator integration, arm/disarm, force-arm context, arming-exception notifications, PIN validation |
+| `alarm_control_panel/_panels.py` | The combined panel and the per-axis Interior, Perimeter and Annex sub-panels |
+| `sensor.py` | Sentinel temperature, humidity and air-quality sensors, and the activity log sensor |
+| `binary_sensor.py` | WiFi connection status diagnostic sensor (CoordinatorEntity, no polling) |
+| `event.py` | The activity timeline as an `event` entity |
+| `events.py` | Activity-timeline events on the Home Assistant event bus |
+| `lock.py` | Multi-lock entity (CoordinatorEntity) with lock feature attributes |
+| `camera.py` | Camera entities: VerisureCamera (thumbnail), VerisureCameraFull (full image), both CoordinatorEntity |
+| `button.py` | Refresh and capture buttons (both deprecated) |
+| `api_queue.py` | Priority-based rate-limited API queue (FOREGROUND/BACKGROUND) |
+| `const.py` | Integration constants, signal names, config keys, platform list, card URLs, `SENTINEL_SERVICE_NAMES` |
+| `log_filter.py` | `SensitiveDataFilter` -- log sanitization for secrets |
+| `pin_crypto.py` | `hash_pin`/`verify_pin` -- PBKDF2-HMAC-SHA256 hashing for the local alarm/lock PIN |
+| `migrate_unique_ids.py` | Rewrites pre-v5 entity unique_ids to the v5.0.2 `v4_securitas_direct.<num>_<type>` form |
+| `notification_translations.py` | Translations for persistent notifications and mobile push action labels |
+| `verisure_owa_api/client/_base.py` | `_ClientBase` -- auth lifecycle, headers, typed GraphQL execution (`_execute_graphql`), polling |
+| `verisure_owa_api/client/_auth.py` | Login, refresh, logout, 2FA device validation, OTP |
+| `verisure_owa_api/client/_alarm.py` | Arm, disarm, check, status, arming exceptions |
+| `verisure_owa_api/client/_installation.py` | Installation list and service catalog |
+| `verisure_owa_api/client/_lock.py` | Lock status, config (Smartlock with Danalock fallback), mode change |
+| `verisure_owa_api/client/_camera.py` | Camera list, capture, thumbnail, full image |
+| `verisure_owa_api/client/_sentinel.py` | Sentinel comfort sensors and air quality |
+| `verisure_owa_api/client/_activity.py` | Panel activity timeline (xSActV2) |
+| `verisure_owa_api/client/__init__.py` | `VerisureOwaClient`, assembled from the domain modules above |
+| `verisure_owa_api/http_transport.py` | `HttpTransport` -- raw HTTP POST with retries, WAF detection, JSON parsing |
+| `verisure_owa_api/graphql_queries.py` | GraphQL query and mutation string constants |
+| `verisure_owa_api/command_resolver.py` | `CommandResolver`, `CommandStep` -- state transition logic |
+| `verisure_owa_api/capabilities.py` | Capability detection helpers |
+| `verisure_owa_api/models/` | Pydantic domain models, one module per domain (`alarm`, `activity`, `auth`, `camera`, `installation`, `lock`, `sentinel`, `services`) |
+| `verisure_owa_api/responses/` | Pydantic response envelopes for every GraphQL operation, one module per domain, plus shared fragments (`_base`) and top-level errors (`errors`) |
+| `verisure_owa_api/pydantic_utils.py` | Shared Pydantic helpers |
+| `verisure_owa_api/const.py` | `VerisureOwaState`, command/protocol mappings, defaults |
+| `verisure_owa_api/domains.py` | Country-to-URL routing |
+| `verisure_owa_api/exceptions.py` | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
+| `verisure_owa_api/examples/basic_operations.py` | Standalone example of using the API client |
+| `www/verisure-owa-alarm-card.js` | Custom Lovelace alarm card and its editor. **Deprecated since v5.8.0**, together with the badge and Mushroom chip in `www/verisure-owa-alarm-chip.js`: the card shows a notice the user can close, and each of the three reports itself once per element instance over the `verisure_owa/deprecated_element` websocket command, which logs one warning per element and dashboard until Home Assistant restarts. |
+| `www/verisure-owa-alarm-chip.js` | The alarm badge, Mushroom chip and Tile feature, kept apart from the card so they render without loading it |
+| `www/verisure-owa-alarm-badge-editor.js` | Visual editor for the badge, loaded only when it is edited |
+| `www/verisure-owa-alarm-shared.js` | Helpers, constants and translations shared by the card, editor, badge and chip |
+| `www/verisure-owa-arm-exception.js` | Arming-exception (Force Arm) presentation shared by the card, Tile feature and More Info |
+| `www/verisure-owa-more-info.js` | Extension to Home Assistant's own alarm More Info dialog; loaded on every page |
+| `www/verisure-owa-camera-card.js` | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner |
+| `www/verisure-owa-activity-log-card.js` | Custom Lovelace **Activity Log** card showing recent alarm-panel activity |
+| `www/verisure-owa-card-utils.js` | Small utilities shared by the cards |
+| `www/securitas-alarm-card.js`, `www/securitas-camera-card.js` | Legacy resources served at `/securitas_panel/` for installs from before v5.0.0 whose dashboards still list them. They only import the current modules, which also register the old `securitas-*` element names, so old dashboards keep rendering; the card picker offers only the `verisure-owa-*` names. |
 
 **Card cache-busting.** The card files are served from `/verisure-owa-panel` with a long browser cache lifetime, so every URL the integration serves from it carries `?v=<first 8 hex of the file's sha256>-<manifest version>`. `const.py::_card_url` stamps the registered entry points when `const.py` is imported. The relative imports between modules (for example `./verisure-owa-card-utils.js`) are stamped in the JS source by `scripts/stamp_card_imports.py`, dependencies first, so a change to one module changes the URL of every module that imports it, directly or through others. After editing a card module, run `python3 scripts/stamp_card_imports.py` and restart Home Assistant so it serves the new entry-point URLs. `tests/test_card_cache_busting.py`, `tests-js/integration/card-cache-busting.test.js` and the pre-push hook (`--check`) fail when a stamp is out of date, and the release workflow re-runs the script after each version bump.
