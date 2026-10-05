@@ -60,20 +60,20 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 
 ### VerisureOwaClient (`client/`)
 
-A composed class implementing all business-level API operations: login, refresh, 2FA validation, arm/disarm, status checks, sentinel data, lock operations, camera operations, and service discovery. All GraphQL query and mutation strings are defined in `graphql_queries.py` and imported here.
+A composed class implementing all business-level API operations: login, refresh, 2FA validation, arm/disarm, status checks, sentinel data, lock operations, camera operations, and service discovery. Almost all GraphQL query and mutation strings are defined in `graphql_queries.py` and imported here; the one-line `Logout` mutation is written inline in `_auth.py`.
 
-The class is split across per-domain mixins under the `client/` package — `_base.py` carries the transport composition, GraphQL execution, auth lifecycle, polling, and sanitization; `_auth.py`, `_alarm.py`, `_lock.py`, `_camera.py`, `_sentinel.py`, `_installation.py` each contribute their domain's operations as mixins. `VerisureOwaClient` itself lives in `client/__init__.py` and inherits from the mixins. The split is purely organisational; consumers import `VerisureOwaClient` exactly as before.
+The class is split across per-domain mixins under the `client/` package — `_base.py` carries the transport composition, GraphQL execution, auth lifecycle, polling, and sanitization; `_auth.py`, `_alarm.py`, `_lock.py`, `_camera.py`, `_sentinel.py`, `_installation.py`, `_activity.py` each contribute their domain's operations as mixins. `VerisureOwaClient` itself lives in `client/__init__.py` and inherits from the mixins. The split is purely organisational; consumers import `VerisureOwaClient` exactly as before.
 
 **Architecture:** `VerisureOwaClient` takes an `HttpTransport` via its constructor (composition, not inheritance, despite the mixin layout — the transport is held as `self._transport`). This separation means the transport layer can be mocked independently of business logic in tests.
 
-**Typed GraphQL execution:** `_execute_graphql()` is the central entry point for all installation-scoped operations. It:
+**Typed GraphQL execution:** `_execute_graphql()` is the entry point for operations whose response is validated into a typed envelope. It:
 1. Calls `_ensure_auth()` (skipped for auth operations like `mkLoginToken`, `RefreshLogin`, `mkSendOTP`, `mkValidateDevice`)
 2. Builds headers and posts via `_send()`, which also decides the transport's 403-retry policy (auth mutations are never re-sent)
 3. Checks for GraphQL-level errors via `_check_graphql_errors()`
 4. Validates the JSON response into a typed Pydantic envelope via `response_type.model_validate(response_dict)`
 6. Returns the typed Pydantic model
 
-Auth operations that need to inspect the raw response structure use `_execute_raw()` instead, which skips Pydantic validation and returns the raw dict.
+The sign-in operations (login, refresh, device validation, OTP, logout), the service catalog (`Srv`) and `xSGetExceptions` use `_execute_raw()` instead. It sends through the same `_send()`, but skips the error check and Pydantic validation and returns the raw dict.
 
 **403 session-expired retry:** When the Verisure server returns a GraphQL error with `data.status == 403` (indicating a server-side session expiry), `_check_graphql_errors()` raises `SessionExpiredError`. The `_execute_graphql()` method catches this, forces token re-authentication, and retries the operation once. A `_retried` flag prevents infinite retry loops.
 
@@ -109,13 +109,13 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 ### Response envelopes (`responses/`)
 
-Every GraphQL operation has a typed Pydantic `BaseModel` envelope under the `responses/` package that mirrors the exact shape of the API response. For example, `ArmPanelEnvelope` wraps `{"data": {"xSArmPanel": {res, msg, referenceId}}}`. This provides compile-time type safety and runtime validation — if the API response shape changes unexpectedly, `model_validate()` raises `ValidationError` which `_execute_graphql()` converts to `VerisureOwaError`.
+Each operation run through `_execute_graphql()` has a typed Pydantic `BaseModel` envelope under the `responses/` package that mirrors the exact shape of the API response. For example, `ArmPanelEnvelope` wraps `{"data": {"xSArmPanel": {res, msg, referenceId}}}`. This provides compile-time type safety and runtime validation — if the API response shape changes unexpectedly, `model_validate()` raises `ValidationError` which `_execute_graphql()` converts to `VerisureOwaError`.
 
-The package is split per domain (`alarm.py`, `lock.py`, `camera.py`, `sentinel.py`, `auth.py`, `installation.py`, plus shared `_common.py` for `_ResMsg`, `_ResMsgRef`, `_OperationResult`, `_GeneralStatus`). All envelopes are re-exported from `responses/__init__.py`.
+The package is split per domain (`alarm.py`, `lock.py`, `camera.py`, `sentinel.py`, `auth.py`, `installation.py`, `activity.py`), plus `errors.py` for top-level GraphQL errors and a shared `_base.py` for `_ResMsg`, `_ResMsgRef`, `_OperationResult` and `PanelError`. All envelopes are re-exported from `responses/__init__.py`.
 
-Envelopes use a `_NullSafeBase` base class that coerces `None` to `""` for any `str` field with a default. This is necessary because the Verisure API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
+Envelopes use a `_NullSafeBase` base class (`NullSafeBase` from `pydantic_utils.py`) that coerces `None` to `""` for any `str` field with a default. This is necessary because the Verisure API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
 
-Shared inner models (`_ResMsg`, `_ResMsgRef`, `_OperationResult`, `_GeneralStatus`) are used across multiple envelopes to avoid duplication. `PanelError` carries force-arm context (allowForcing, referenceId, suid).
+Shared inner models (`_ResMsg`, `_ResMsgRef`, `_OperationResult`) are used across multiple envelopes to avoid duplication. `PanelError` carries force-arm context (allowForcing, referenceId, suid).
 
 ### Domain models (`models/`)
 
