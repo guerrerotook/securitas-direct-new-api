@@ -40,7 +40,7 @@ The integration has three layers:
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client/`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). Operations are grouped into per-domain mixins (`_auth`, `_alarm`, `_lock`, `_camera`, `_sentinel`, `_installation`, `_activity`) that the public `VerisureOwaClient` class composes. The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Five `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, cameras, and, when enabled, the activity timeline. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
+Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client/`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). Operations are grouped into per-domain mixins (`_auth`, `_alarm`, `_lock`, `_camera`, `_sentinel`, `_installation`, `_activity`) that the public `VerisureOwaClient` class composes. The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Five `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, cameras, and, when enabled, the activity timeline. Every entity except the buttons (which inherit only `VerisureEntity`) uses the `CoordinatorEntity` pattern. The alarm, sensor, binary sensor, event and refresh-button platforms create their entities at setup for the installations found then; the camera and lock platforms only store their `async_add_entities` callback, and `discovery.py` adds the camera, capture-button and lock entities from a background task once it has found the devices.
 
 ## API client layer
 
@@ -402,15 +402,15 @@ A thin wrapper around `Installation` that provides `device_info` for the HA devi
 
 ### VerisureEntity (`entity.py`)
 
-Base class for non-coordinator entities. Inherits from `homeassistant.helpers.entity.Entity` and provides:
+Shared base for the entities that act on the installation through the hub. Inherits from `homeassistant.helpers.entity.Entity` and provides:
 
 - **Common attributes** — `_installation`, `_client` (the `VerisureHub`), `_state`, `_last_state`, and `device_info` (via the `securitas_device_info()` helper that groups entities under the installation device).
-- **State management** — `_force_state(state)` sets a transitional state and schedules an HA state write. Used during lock operations and similar.
-- **Error notifications** — `_notify_error(title, message)` creates a persistent notification with an auto-generated ID scoped to the installation number.
+- **Accessors** — `installation` and `client` properties.
+- **State management** — `_force_state(state)` sets a transitional state and writes the HA state. Used by the alarm panels and the lock during arm, disarm and lock operations.
 
-The `VerisureRefreshButton` and `VerisureCaptureButton` inherit from `VerisureEntity`. The alarm, sensor, binary sensor, lock, camera, and event entities use `CoordinatorEntity` instead and duplicate the relevant helper methods directly (to avoid diamond inheritance).
+The buttons (`VerisureRefreshButton`, `VerisureCaptureButton`) inherit `VerisureEntity` only. The alarm panels (`BaseVerisureOwaAlarmPanel`) and `VerisureLock` combine `VerisureEntity` with `CoordinatorEntity` and call both base `__init__`s. The sensor, binary sensor, camera and event entities use `CoordinatorEntity` without `VerisureEntity`.
 
-The module also provides `securitas_device_info()` and `camera_device_info()` helpers for building `DeviceInfo` objects.
+The module also provides `securitas_device_info()`, `camera_device_info()` and `lock_device_info()` helpers for building `DeviceInfo` objects.
 
 ## Entity platforms
 
@@ -1089,7 +1089,7 @@ tests/
 ├── test_auth.py                    VerisureOwaClient login, refresh, 2FA, token lifecycle
 ├── test_binary_sensor.py           WiFi connection binary sensor (coordinator-driven)
 ├── test_button.py                  Deprecated refresh button (setup, press hands over to the alarm entity's refresh), capture button unique ID
-├── test_camera_api.py              Camera Pydantic models, response log sanitising, hub camera operations
+├── test_camera_api.py              Camera Pydantic models, response log sanitising, local copies of the capture-poll and JPEG checks
 ├── test_camera_platform.py         Camera entity platform setup and image serving
 ├── test_capabilities.py            Capability JWT decoding and detection helpers
 ├── test_card_cache_busting.py      Card modules' relative imports carry the imported file's content stamp

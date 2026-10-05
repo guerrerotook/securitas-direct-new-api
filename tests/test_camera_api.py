@@ -1,5 +1,5 @@
 """Tests for the CameraDevice and ThumbnailResponse Pydantic models, response log
-sanitising, and hub camera operations."""
+sanitising, and local copies of the camera capture-poll and JPEG checks."""
 
 import base64
 import json
@@ -116,10 +116,12 @@ class TestSanitizeResponseForLog:
         assert result["data"]["xSGetThumbnail"]["type"] == "BINARY"
 
 
-# ── Hub camera operations ────────────────────────────────────────────────────
+# ── Camera logic, checked locally ────────────────────────────────────────────
 
 
 class TestHubCameraOperations:
+    """Local copies of hub camera logic; no VerisureHub method is called."""
+
     def test_signal_camera_state_constant_exists(self):
         from custom_components.securitas import SIGNAL_CAMERA_STATE
 
