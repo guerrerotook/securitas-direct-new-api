@@ -292,7 +292,7 @@ The central coordinator between the HA layer and the API client. It owns a `Veri
 
 ### Coordinators (`coordinators.py`)
 
-Five `DataUpdateCoordinator` subclasses replace per-entity independent polling. Each coordinator owns a reference to the `VerisureOwaClient` and `ApiQueue`, fetches data on its configured interval, and handles `SessionExpiredError` (re-login + retry), `WAFBlockedError`, and general `VerisureOwaError` by raising `UpdateFailed`.
+Five `DataUpdateCoordinator` subclasses replace per-entity independent polling. Each coordinator owns a reference to the `VerisureOwaClient` and `ApiQueue`, fetches data on its configured interval, and runs each fetch through the shared `_fetch_with_session_recovery()` helper (see below).
 
 **`AlarmCoordinator`** — Polls alarm status via `get_general_status()` (lightweight `xSStatus`, no panel wake). Returns `AlarmStatusData` with `SStatus` and `protom_response`. Update interval is the user-configured `scan_interval`.
 
@@ -304,7 +304,7 @@ Five `DataUpdateCoordinator` subclasses replace per-entity independent polling. 
 
 **`ActivityCoordinator`** — Fetches the panel's activity timeline via `get_activity()` (`xSActV2`) and merges it with the events Home Assistant added itself. Returns `ActivityData` with `events` and `new_events`: entries not in the previous poll, leaving out the panel's echoes of actions Home Assistant itself issued (marked `duplicate_of`). `new_events` is always empty on the first fetch, which sets the baseline, and whenever polling is off (`update_interval is None`). Polls every 60 seconds only when activity polling is enabled in the options; otherwise `update_interval` is `None` and it refreshes on demand, as when the activity-log card calls `refresh_activity_log`.
 
-All coordinators share the same error-handling pattern: catch `SessionExpiredError` -> re-login -> retry once; catch `WAFBlockedError` or `VerisureOwaError` -> raise `UpdateFailed`.
+All coordinators share the same error handling, in `_fetch_with_session_recovery()`. On `SessionExpiredError`, an account with a stored password signs in again and retries the fetch once; a refresh-token-only account (the norm since v5.1.0) raises `UpdateFailed` straight away and retries on the next poll. A genuine auth failure (bad credentials, a blocked account, a dead refresh token), whether from the fetch or from the new sign-in, raises `ConfigEntryAuthFailed`, so Home Assistant asks the user to sign in again. `WAFBlockedError` and any other `VerisureOwaError` raise `UpdateFailed`.
 
 ### ApiQueue (`api_queue.py`)
 
@@ -1175,7 +1175,7 @@ assert result["type"] == FlowResultType.FORM
 
 **Integration setup tests** (test_init): Patch `VerisureHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms.
 
-**Coordinator tests** (test_coordinators): Test all five coordinators with mocked `VerisureOwaClient` and `ApiQueue`. Verify data fetching, error handling (SessionExpiredError re-login, WAFBlockedError, general errors), and data preservation across refreshes.
+**Coordinator tests** (test_coordinators): Test all five coordinators with mocked `VerisureOwaClient` and `ApiQueue`. Verify data fetching, error handling (SessionExpiredError recovery, auth failures that ask for reauth, WAFBlockedError, general errors), and data preservation across refreshes.
 
 ### Integration tests (`test_integration.py`, `mock_graphql.py`)
 
@@ -1246,7 +1246,7 @@ Paths are relative to `custom_components/securitas/`.
 |------|---------|
 | `__init__.py` | Integration setup functions, session sharing, coordinator creation, card registration, service registration, Repairs issues |
 | `hub.py` | `VerisureHub` (central hub wrapping VerisureOwaClient), `VerisureDevice` (device registry wrapper) |
-| `entity.py` | `VerisureEntity` base class, `securitas_device_info()`, `camera_device_info()` |
+| `entity.py` | `VerisureEntity` base class, `securitas_device_info()`, `camera_device_info()`, `lock_device_info()` |
 | `coordinators.py` | `AlarmCoordinator`, `SentinelCoordinator`, `LockCoordinator`, `CameraCoordinator`, `ActivityCoordinator` |
 | `discovery.py` | Background discovery of cameras and locks |
 | `config_flow.py` | Config flow (setup + 2FA + reauth/Reconfigure + installation picker) and options flow (settings + mappings) |
