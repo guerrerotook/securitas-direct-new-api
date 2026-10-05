@@ -116,7 +116,7 @@ Each operation run through `_execute_graphql()` has a typed Pydantic `BaseModel`
 
 The package is split per domain (`alarm.py`, `lock.py`, `camera.py`, `sentinel.py`, `auth.py`, `installation.py`, `activity.py`), plus `errors.py` for top-level GraphQL errors and a shared `_base.py` for `_ResMsg`, `_ResMsgRef`, `_OperationResult` and `PanelError`. All envelopes are re-exported from `responses/__init__.py`.
 
-Envelopes use a `_NullSafeBase` base class (`NullSafeBase` from `pydantic_utils.py`) that coerces `None` to `""` for any `str` field with a default. This is necessary because the Verisure API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
+The envelopes themselves and their `Data` wrappers are plain `BaseModel`s; the shared inner models `_ResMsg`, `_ResMsgRef` and `_OperationResult` use a `_NullSafeBase` base class (`NullSafeBase` from `pydantic_utils.py`) that coerces `None` to `""` for any `str` field with a default. This is necessary because the Verisure API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
 
 Shared inner models (`_ResMsg`, `_ResMsgRef`, `_OperationResult`) are used across multiple envelopes to avoid duplication. `PanelError` carries force-arm context (allowForcing, referenceId, suid).
 
@@ -172,7 +172,7 @@ Almost every GraphQL query and mutation string lives in `graphql_queries.py` as 
 
 ### Debug logging conventions
 
-All debug log messages use context prefixes for easy filtering:
+Many debug log messages carry a context prefix for easy filtering (others, such as capability detection and the transport's retry messages, have none):
 
 | Prefix | Layer | Example |
 |--------|-------|---------|
@@ -302,7 +302,7 @@ Five `DataUpdateCoordinator` subclasses replace per-entity independent polling. 
 
 **`CameraCoordinator`** — Fetches thumbnails for all cameras. Returns `CameraData` with `thumbnails` (per zone_id) and `full_images` (per zone_id). Fixed 30-minute interval. Individual camera failures are logged but don't fail the whole update — previous thumbnails are preserved. When a thumbnail's `id_signal` changes from the previous refresh, the coordinator automatically fetches the full-resolution image via `get_full_image()`. Thumbnails older than 1 hour are skipped for full-image fetch (they likely have no full image available on the CDN).
 
-**`ActivityCoordinator`** — Fetches the panel's activity timeline via `get_activity()` (`xSActV2`) and merges it with the events Home Assistant added itself. Returns `ActivityData` with `events` and `new_events`: entries not in the previous poll, leaving out the panel's echoes of actions Home Assistant itself issued (marked `duplicate_of`). `new_events` is always empty on the first fetch, which sets the baseline, and whenever polling is off (`update_interval is None`). Polls every 60 seconds only when activity polling is enabled in the options; otherwise `update_interval` is `None` and it refreshes on demand, as when the activity-log card calls `refresh_activity_log`.
+**`ActivityCoordinator`** — Fetches the panel's activity timeline via `get_activity()` (`xSActV2`) and merges it with the events Home Assistant added itself. Returns `ActivityData` with `events` and `new_events`: entries not in the previous poll, leaving out the panel's echoes of actions Home Assistant itself issued (marked `duplicate_of`). A refresh's `new_events` is always empty on the first fetch, which sets the baseline, and whenever polling is off (`update_interval is None`). An event Home Assistant adds itself through `inject_event()` is published as `new_events=[event]` whether polling is on or off. Polls every 60 seconds only when activity polling is enabled in the options; otherwise `update_interval` is `None` and it refreshes on demand, as when the activity-log card calls `refresh_activity_log`.
 
 All coordinators share the same error handling, in `_fetch_with_session_recovery()`. On `SessionExpiredError`, an account with a stored password signs in again and retries the fetch once; a refresh-token-only account (the norm since v5.1.0) raises `UpdateFailed` straight away and retries on the next poll. A genuine auth failure (bad credentials, a blocked account, a dead refresh token), whether from the fetch or from the new sign-in, raises `ConfigEntryAuthFailed`, so Home Assistant asks the user to sign in again. `WAFBlockedError` and any other `VerisureOwaError` raise `UpdateFailed`.
 
