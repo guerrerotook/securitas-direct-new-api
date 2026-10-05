@@ -1272,7 +1272,7 @@ Paths are relative to `custom_components/securitas/`.
 | `verisure_owa_api/command_resolver.py` | `CommandResolver`, `CommandStep` -- state transition logic |
 | `verisure_owa_api/capabilities.py` | Capability detection helpers |
 | `verisure_owa_api/models/` | Pydantic domain models, one module per domain (`alarm`, `activity`, `auth`, `camera`, `installation`, `lock`, `sentinel`, `services`) |
-| `verisure_owa_api/responses/` | Pydantic response envelopes for every GraphQL operation, one module per domain, plus shared fragments (`_base`) and top-level errors (`errors`) |
+| `verisure_owa_api/responses/` | Pydantic response envelopes, one module per domain, plus shared fragments (`_base`) and top-level errors (`errors`) |
 | `verisure_owa_api/pydantic_utils.py` | Shared Pydantic helpers |
 | `verisure_owa_api/const.py` | `VerisureOwaState`, command/protocol mappings, defaults |
 | `verisure_owa_api/domains.py` | Country-to-URL routing |
