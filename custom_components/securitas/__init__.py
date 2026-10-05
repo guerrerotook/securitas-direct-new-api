@@ -12,10 +12,14 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-import voluptuous as vol
+if TYPE_CHECKING:
+    # HA 2026.9+ runs voluptuous as probatio; 2026.10+ types its APIs with probatio's classes.
+    import probatio as vol
+else:
+    import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
 )

@@ -8,9 +8,13 @@ import socket
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
+if TYPE_CHECKING:
+    # HA 2026.9+ runs voluptuous as probatio; 2026.10+ types its APIs with probatio's classes.
+    import probatio as vol
+else:
+    import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import (
     CONF_CODE,
