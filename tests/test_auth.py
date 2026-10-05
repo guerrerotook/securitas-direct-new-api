@@ -72,9 +72,7 @@ class TestLogin:
         with pytest.raises(AuthenticationError):
             await api.login()
 
-    async def test_execute_request_error_raises_securitas_error(
-        self, api, mock_execute
-    ):
+    async def test_transport_error_raises_securitas_error(self, api, mock_execute):
         """Connection error (no response data) re-raises VerisureOwaError."""
         mock_execute.side_effect = VerisureOwaError("Connection failed")
 
@@ -371,7 +369,7 @@ class TestLoginEdgeCases:
     async def test_error_with_need_device_authorization_raises_two_factor_required_error(
         self, api, mock_execute
     ):
-        """When _execute_request raises VerisureOwaError whose response data
+        """When the transport's execute raises VerisureOwaError whose response data
         contains xSLoginToken.needDeviceAuthorization=True, TwoFactorRequiredError is raised."""
         error_response = {
             "data": {
@@ -392,7 +390,7 @@ class TestLoginEdgeCases:
     async def test_error_response_with_data_raises_authentication_error(
         self, api, mock_execute
     ):
-        """When _execute_request raises VerisureOwaError whose response data
+        """When the transport's execute raises VerisureOwaError whose response data
         has xSLoginToken but needDeviceAuthorization is False, AuthenticationError is raised."""
         error_response = {
             "data": {
@@ -452,7 +450,7 @@ class TestLoginEdgeCases:
 
 class TestValidateDeviceEdgeCases:
     async def test_error_with_phone_data_returns_otp_tuple(self, api, mock_execute):
-        """When _execute_request raises VerisureOwaError with phone data in
+        """When the transport's execute raises VerisureOwaError with phone data in
         the error response, returns (otp_hash, phones) tuple."""
         error_response = {
             "errors": [

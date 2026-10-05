@@ -2,9 +2,10 @@
 
 These tests exercise the full stack — from HA config-entry setup through to
 entities in the state machine — using a MockGraphQLServer that intercepts
-aiohttp POST calls at the HTTP transport level.  The real _execute_request()
-runs (header construction, JSON parsing, error handling), unlike the unit tests
-which patch _execute_request directly.
+aiohttp POST calls at the HTTP transport level.  The real client and
+HttpTransport.execute() run (header construction, JSON parsing, error
+handling), unlike the unit tests, which mock HttpTransport.execute() directly
+(the mock_execute fixture or a local transport fixture).
 """
 
 import contextlib

@@ -800,7 +800,7 @@ class _ClientBase:
             _err.response_body = response_dict
             raise _err from err
 
-    # ── Raw execute (for auth operations that don't use typed envelopes) ─
+    # ── Raw execute (callers that read the raw response themselves) ──────
 
     async def _execute_raw(
         self,
@@ -811,8 +811,10 @@ class _ClientBase:
     ) -> dict[str, Any]:
         """Execute a GraphQL operation and return the raw dict.
 
-        Used for auth operations (login, refresh, validate_device, send_otp)
-        that need to inspect the raw response structure.
+        Used by operations whose raw response the caller reads itself: the
+        sign-in operations, the service catalog, the exceptions fetch and the
+        `_submit_and_poll()` status polls. Skips the auth check, the GraphQL
+        error check and validation.
         """
         return await self._send(content, operation, installation=installation)
 

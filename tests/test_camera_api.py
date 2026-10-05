@@ -1,4 +1,5 @@
-"""Tests for CameraDevice, ThumbnailResponse dataclasses, and camera utility functions."""
+"""Tests for the CameraDevice and ThumbnailResponse Pydantic models, response log
+sanitising, and hub camera operations."""
 
 import base64
 import json
@@ -8,11 +9,11 @@ from custom_components.securitas.verisure_owa_api.models import (
     ThumbnailResponse,
 )
 
-# ── Dataclass tests ──────────────────────────────────────────────────────────
+# ── Model tests ──────────────────────────────────────────────────────────────
 
 
 class TestCameraDevice:
-    """Tests for the CameraDevice dataclass."""
+    """Tests for the CameraDevice Pydantic model."""
 
     def test_default_values(self):
         """Test CameraDevice has correct default values."""
@@ -43,7 +44,7 @@ class TestCameraDevice:
 
 
 class TestThumbnailResponse:
-    """Tests for the ThumbnailResponse dataclass."""
+    """Tests for the ThumbnailResponse Pydantic model."""
 
     def test_default_values(self):
         """Test ThumbnailResponse has correct default values."""

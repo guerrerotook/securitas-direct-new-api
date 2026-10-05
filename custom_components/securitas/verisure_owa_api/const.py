@@ -47,12 +47,12 @@ STATE_TO_COMMAND: dict[VerisureOwaState, str] = {
     VerisureOwaState.TOTAL_PERI: "ARM1PERI1",
 }
 # Proto response code for the disarmed state (handled separately from PROTO_TO_STATE
-# in alarm_control_panel.py because it applies unconditionally regardless of mapping)
+# in alarm_control_panel/_base.py because it applies unconditionally regardless of mapping)
 PROTO_DISARMED = "D"
 
 # Map protomResponse code -> VerisureOwaState
 PROTO_TO_STATE: dict[str, VerisureOwaState] = {
-    # Same as DISARMED_PERI but alarm_control_panel.py already handles
+    # Same as DISARMED_PERI but alarm_control_panel/_base.py already handles
     # the disarmed case without using this map
     "D": VerisureOwaState.DISARMED,
     "E": VerisureOwaState.PERI_ONLY,
