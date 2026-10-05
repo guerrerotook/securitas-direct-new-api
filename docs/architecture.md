@@ -65,7 +65,7 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 
 A composed class implementing all business-level API operations: login, refresh, 2FA validation, arm/disarm, status checks, sentinel data, lock operations, camera operations, and service discovery. Almost all GraphQL query and mutation strings are defined in `graphql_queries.py` and imported here; the one-line `Logout` mutation is written inline in `client/_auth.py`.
 
-The class is split across per-domain mixins under the `client/` package — `_base.py` carries the transport composition, GraphQL execution, auth lifecycle, polling, and sanitization; `_auth.py`, `_alarm.py`, `_lock.py`, `_camera.py`, `_sentinel.py`, `_installation.py`, `_activity.py` each contribute their domain's operations as mixins. `VerisureOwaClient` itself lives in `client/__init__.py` and inherits from the mixins. The split is purely organisational; consumers import `VerisureOwaClient` exactly as before.
+The class is split across per-domain mixins under the `client/` package — `_base.py` carries the transport composition, GraphQL execution, auth lifecycle and polling; `_auth.py`, `_alarm.py`, `_lock.py`, `_camera.py`, `_sentinel.py`, `_installation.py`, `_activity.py` each contribute their domain's operations as mixins. `VerisureOwaClient` itself lives in `client/__init__.py` and inherits from the mixins. The split is purely organisational; consumers import `VerisureOwaClient` exactly as before.
 
 **Architecture:** `VerisureOwaClient` takes an `HttpTransport` via its constructor (composition, not inheritance, despite the mixin layout — the transport is held as `self._transport`). This separation means the transport layer can be mocked independently of business logic in tests.
 
