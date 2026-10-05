@@ -13,8 +13,14 @@ file is easier to navigate:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import voluptuous as vol
+# Home Assistant 2026.9+ runs probatio under the voluptuous name and types
+# its schema parameters with it; older releases have only voluptuous.
+if TYPE_CHECKING:
+    import probatio as vol
+else:
+    import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE
 from homeassistant.core import HomeAssistant
