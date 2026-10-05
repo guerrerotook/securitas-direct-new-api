@@ -40,7 +40,9 @@
 - CI additionally runs pylint, the integration suite (`-m integration`) on the
     stable, dev and minimum HA channels, and a combined 90% coverage gate.
 - Before creating a PR run `ruff check .`, `ruff format .` and
-    `pyright custom_components/`.
+    `pyright custom_components/`. Pyright needs Home Assistant 2026.10 or
+    newer installed (a beta counts): from 2026.10, HA's type hints use the
+    classes of probatio, the library HA 2026.9+ runs in place of voluptuous.
 - New user-facing strings must be translated into every locale in
     `custom_components/securitas/translations/`; `strings.json` stays English.
 - The `manifest.json` keys must be sorted: `domain`, `name` first, then all

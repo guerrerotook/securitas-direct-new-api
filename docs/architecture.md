@@ -41,7 +41,7 @@ Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), 
 
 ## API client layer
 
-**Location:** `custom_components/verisure_owa/verisure_owa_api/`
+**Location:** `custom_components/securitas/verisure_owa_api/`
 
 ### HttpTransport (`http_transport.py`)
 
@@ -263,7 +263,7 @@ VerisureOwaError                  Base class (http_status, message, response_bod
 
 ## Integration hub layer
 
-**Location:** `custom_components/verisure_owa/hub.py` (`VerisureHub`, `VerisureDevice`) and `custom_components/verisure_owa/__init__.py` (setup functions only)
+**Location:** `custom_components/securitas/hub.py` (`VerisureHub`, `VerisureDevice`) and `custom_components/securitas/__init__.py` (setup functions only)
 
 ### VerisureHub
 
@@ -1052,15 +1052,17 @@ The test suite has **1028 tests** achieving **92% overall coverage**. Tests run 
 python -m pytest tests/ -v --tb=short
 
 # Run with coverage
-python -m pytest tests/ --cov=custom_components/verisure_owa --cov-report=term-missing
+python -m pytest tests/ --cov=custom_components/securitas --cov-report=term-missing
 
 # Run a single test file
 python -m pytest tests/test_client_auth.py -v
 
 # Lint and type check
 ruff check . && ruff format --check .
-pyright custom_components/verisure_owa/
+pyright custom_components/
 ```
+
+Pyright needs Home Assistant 2026.10 or newer installed: from 2026.10, HA's type hints name the classes of probatio (the library HA 2026.9+ runs in place of voluptuous), so schemas the integration builds fail to type-check against older releases.
 
 ### Test architecture
 
@@ -1164,7 +1166,7 @@ server.add_response("mkInstallationList", graphql_installations())
 server.set_default_response("CheckAlarm", graphql_check_alarm())
 
 mock_http = server.make_http_client()
-with patch("custom_components.verisure_owa.async_get_clientsession", return_value=mock_http):
+with patch("custom_components.securitas.async_get_clientsession", return_value=mock_http):
     result = await async_setup_entry(hass, entry)
 
 assert server.call_count("mkLoginToken") == 1
@@ -1221,7 +1223,7 @@ Key design choices:
 Three parallel jobs run on every PR and push to main:
 
 1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
-2. **Pyright** — `pyright custom_components/verisure_owa/` for static type checking
+2. **Pyright** — `pyright custom_components/` for static type checking
 3. **Tests** — `pytest` with `--cov-fail-under=90` to enforce minimum coverage
 
 ### Nightly workflow (`.github/workflows/nightly.yml`)

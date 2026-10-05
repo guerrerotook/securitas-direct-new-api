@@ -7,6 +7,8 @@
 # Python tests run UNIT-only here (the integration suite + the combined 90%
 # coverage gate stay in CI, which also runs the min/dev HA matrix). Tests run
 # against the HA-stable installed in this environment (the devcontainer).
+# Pyright needs HA 2026.10 or newer there: from 2026.10, HA's type hints use
+# the classes of probatio, the library HA 2026.9+ runs in place of voluptuous.
 #
 # Install once per clone:  bash bin/install-hooks.sh
 # Bypass in an emergency:  git push --no-verify
