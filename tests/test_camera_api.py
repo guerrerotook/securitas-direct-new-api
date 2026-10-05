@@ -1,4 +1,5 @@
-"""Tests for CameraDevice, ThumbnailResponse dataclasses, and camera utility functions."""
+"""Tests for the CameraDevice and ThumbnailResponse Pydantic models, response log
+sanitising, and local copies of the camera capture-poll and JPEG checks."""
 
 import base64
 import json
@@ -8,11 +9,11 @@ from custom_components.securitas.verisure_owa_api.models import (
     ThumbnailResponse,
 )
 
-# ── Dataclass tests ──────────────────────────────────────────────────────────
+# ── Model tests ──────────────────────────────────────────────────────────────
 
 
 class TestCameraDevice:
-    """Tests for the CameraDevice dataclass."""
+    """Tests for the CameraDevice Pydantic model."""
 
     def test_default_values(self):
         """Test CameraDevice has correct default values."""
@@ -43,7 +44,7 @@ class TestCameraDevice:
 
 
 class TestThumbnailResponse:
-    """Tests for the ThumbnailResponse dataclass."""
+    """Tests for the ThumbnailResponse Pydantic model."""
 
     def test_default_values(self):
         """Test ThumbnailResponse has correct default values."""
@@ -115,10 +116,12 @@ class TestSanitizeResponseForLog:
         assert result["data"]["xSGetThumbnail"]["type"] == "BINARY"
 
 
-# ── Hub camera operations ────────────────────────────────────────────────────
+# ── Camera logic, checked locally ────────────────────────────────────────────
 
 
 class TestHubCameraOperations:
+    """Local copies of hub camera logic; no VerisureHub method is called."""
+
     def test_signal_camera_state_constant_exists(self):
         from custom_components.securitas import SIGNAL_CAMERA_STATE
 

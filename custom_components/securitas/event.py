@@ -32,7 +32,7 @@ async def async_setup_entry(
     """Set up the Verisure OWA activity event entity.
 
     One entity per installation, only when the activity coordinator exists
-    (it is absent when the installation has no accessible activity timeline).
+    (setup creates it whenever the entry has an installation).
     """
     entry_data = hass.data[DOMAIN][entry.entry_id]
     activity_coord: ActivityCoordinator | None = entry_data.get("activity_coordinator")

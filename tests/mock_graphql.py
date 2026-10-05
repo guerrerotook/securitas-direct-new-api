@@ -1,7 +1,7 @@
 """Mock GraphQL server for the Verisure OWA HA integration tests.
 
 Intercepts aiohttp POST calls at the HTTP transport level so that
-_execute_request() runs fully — header construction, JSON parsing,
+the client and HttpTransport.execute() run fully — header construction, JSON parsing,
 error handling — while returning canned responses.
 """
 

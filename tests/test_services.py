@@ -507,7 +507,7 @@ class TestSendOtp:
 
 
 class TestLogout:
-    async def test_calls_execute_request_with_logout(self, authed_api, mock_execute):
+    async def test_calls_transport_with_logout(self, authed_api, mock_execute):
         mock_execute.return_value = {}
 
         await authed_api.logout()

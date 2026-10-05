@@ -273,7 +273,7 @@ def mock_execute(api, mock_transport):
 
 
 def make_installation(**overrides) -> Installation:
-    """Factory for Installation dataclass with sensible defaults."""
+    """Factory for Installation Pydantic model with sensible defaults."""
     defaults = {
         "number": "123456",
         "alias": "Home",

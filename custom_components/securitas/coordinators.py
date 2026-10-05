@@ -1,10 +1,11 @@
 """DataUpdateCoordinators for Verisure OWA HA integration.
 
-Four coordinators replace per-entity independent polling:
+Five coordinators replace per-entity independent polling:
 - AlarmCoordinator: alarm status polling
 - SentinelCoordinator: environmental sensor data
 - LockCoordinator: smart lock mode status
 - CameraCoordinator: camera thumbnails
+- ActivityCoordinator: alarm panel activity timeline
 """
 
 from __future__ import annotations
