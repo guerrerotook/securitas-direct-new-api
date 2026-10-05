@@ -1045,14 +1045,14 @@ Periodic polling always uses the lightweight `xSStatus` (general status) endpoin
 
 ### Overview
 
-The test suite has **1028 tests** achieving **92% overall coverage**. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
+Tests run on every PR and every push to main via GitHub Actions, which fails the run below 90% combined coverage. See [CI workflow](#ci-workflow-githubworkflowstestsyaml) for the Python checks. Every PR and push to main also runs `validate.yaml` (HACS and hassfest) and `codeql-analysis.yml` (CodeQL, Python only), plus `js-tests.yml` (card lint and tests) when the cards, their tests or the JavaScript tooling change.
 
 ```bash
 # Run the full suite
 python -m pytest tests/ -v --tb=short
 
 # Run with coverage
-python -m pytest tests/ --cov=custom_components/securitas --cov-report=term-missing
+python -m pytest tests/ --cov --cov-report=term-missing
 
 # Run a single test file
 python -m pytest tests/test_client_auth.py -v
@@ -1060,6 +1060,7 @@ python -m pytest tests/test_client_auth.py -v
 # Lint and type check
 ruff check . && ruff format --check .
 pyright custom_components/
+pylint custom_components/securitas/
 ```
 
 Pyright needs Home Assistant 2026.10 or newer installed: from 2026.10, HA's type hints name the classes of probatio (the library HA 2026.9+ runs in place of voluptuous), so schemas the integration builds fail to type-check against older releases.
@@ -1191,40 +1192,16 @@ Key design choices:
 - Sensor data: `get_sentinel_data()` and `get_air_quality_data()` parse real response shapes
 - Unload: `async_unload_entry` cleans up `hass.data[DOMAIN]` correctly
 
-### Coverage by module
-
-| Module | Coverage | Key gaps |
-|--------|----------|----------|
-| `__init__.py` | 81% | Lock config retry, card resource registration/removal |
-| `hub.py` | 92% | Some camera/lock edge paths |
-| `entity.py` | 79% | Properties and helpers used by non-coordinator entities |
-| `coordinators.py` | 78% | Camera full-image fetch, thumbnail recency check |
-| `alarm_control_panel.py` | 97% | `async_setup_entry`, some HA callbacks |
-| `api_queue.py` | 100% | -- |
-| `binary_sensor.py` | 100% | -- |
-| `button.py` | 100% | -- |
-| `camera.py` | 98% | Base64 decode error path |
-| `config_flow.py` | 89% | Some flow branches |
-| `client.py` | 92% | Rare error paths, camera capture timeout, Danalock fallback |
-| `http_transport.py` | 97% | Retry-After header parsing edge case |
-| `graphql_queries.py` | 100% | -- |
-| `command_resolver.py` | 90% | Rare fallback paths |
-| `models.py` | 99% | Null-safe base validator |
-| `responses.py` | 99% | Null-safe base validator |
-| `const.py` | 100% | Includes `SENTINEL_SERVICE_NAMES` |
-| `domains.py` | 100% | -- |
-| `exceptions.py` | 100% | -- |
-| `lock.py` | 94% | Timer setup, some error paths |
-| `sensor.py` | 95% | `async_setup_entry` |
-| `log_filter.py` | 88% | Nested arg scanning |
-
 ### CI workflow (`.github/workflows/tests.yaml`)
 
-Three parallel jobs run on every PR and push to main:
+These jobs run in parallel on every PR and push to main:
 
 1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
 2. **Pyright** — `pyright custom_components/` for static type checking
-3. **Tests** — `pytest` with `--cov-fail-under=90` to enforce minimum coverage
+3. **Pylint** — `pylint custom_components/securitas/`
+4. **Tests** — six jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on three Home Assistant channels. `dev` installs the newest `pytest-homeassistant-custom-component`, pre-releases included, and the Home Assistant it pins; `stable` installs the newest release that `requirements_test.txt` allows, and the Home Assistant that release pins, which can be a beta; `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
+
+Once the test jobs finish, the **Coverage gate** combines the `stable` unit and integration coverage and fails below 90%.
 
 ### Nightly workflow (`.github/workflows/nightly.yml`)
 
