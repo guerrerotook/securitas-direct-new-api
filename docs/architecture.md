@@ -151,7 +151,7 @@ Pydantic models for API domain objects, split per domain (`alarm.py`, `lock.py`,
 
 ### GraphQL queries (`graphql_queries.py`)
 
-All GraphQL query and mutation strings are extracted into `graphql_queries.py`, keeping the `client/` modules focused on business logic. This module contains named constants for each operation (e.g. `VALIDATE_DEVICE_MUTATION`, `REFRESH_LOGIN_MUTATION`, `ARM_PANEL_MUTATION`, etc.) that `VerisureOwaClient` imports and passes to `_execute_graphql()`.
+Almost every GraphQL query and mutation string lives in `graphql_queries.py` as a named constant (e.g. `VALIDATE_DEVICE_MUTATION`, `REFRESH_LOGIN_MUTATION`, `ARM_PANEL_MUTATION`), keeping the `client/` modules focused on business logic; the one exception is the one-line `Logout` mutation, written inline in `client/_auth.py`. Most operations go through `_execute_graphql()`, which validates the response into a typed envelope. The sign-in operations (login, refresh, device validation, OTP, logout), the service catalog and a few others go through `_execute_raw()`, which returns the raw response.
 
 ### Log sanitization (`log_filter.py`)
 
@@ -1079,7 +1079,7 @@ tests/
 ├── test_architecture.py            Type-hint rules for the code (no bare dict, no blanket type: ignore, Any baseline)
 ├── test_auth.py                    VerisureOwaClient login, refresh, 2FA, token lifecycle
 ├── test_binary_sensor.py           WiFi connection binary sensor (coordinator-driven)
-├── test_button.py                  Refresh button entity, capture button, 403 WAF notification
+├── test_button.py                  Deprecated refresh button (setup, press hands over to the alarm entity's refresh), capture button unique ID
 ├── test_camera_api.py              Camera dataclasses and camera utility functions
 ├── test_camera_platform.py         Camera entity platform setup and image serving
 ├── test_capabilities.py            Capability JWT decoding and detection helpers
@@ -1093,20 +1093,20 @@ tests/
 ├── test_command_resolver.py        CommandResolver state transitions, fallback chains
 ├── test_config_flow.py             Config flow (setup + 2FA + reauth/Reconfigure) and options flow
 ├── test_constants.py               SENTINEL_SERVICE_NAMES, VerisureOwaState enum, mapping tables
-├── test_coordinators.py            DataUpdateCoordinators: alarm, sentinel, lock, camera
+├── test_coordinators.py            DataUpdateCoordinators: alarm, sentinel, lock, camera, activity
 ├── test_deprecated_card_log.py     Deprecated card, badge and chip log one warning per element and dashboard
 ├── test_domains.py                 Country-to-URL and language routing
 ├── test_entity.py                  Shared entity helpers in entity.py
 ├── test_event.py                   Activity `event` entity
 ├── test_events.py                  Activity-timeline event-bus helper
-├── test_exceptions.py              Exception hierarchy, message, log_detail, response_body
+├── test_exceptions.py              Exception hierarchy, log_detail, and classifying auth failures
 ├── test_execute_request.py         generate_uuid helper
 ├── test_ha_platforms.py            Sensor and lock entities
 ├── test_helpers.py                 VerisureOwaClient helpers: token decoding, response data extraction
 ├── test_http_transport.py          HttpTransport: POST, retries, WAF detection, JSON parsing
-├── test_hub.py                     VerisureHub: camera management, lock management, queue
+├── test_hub.py                     VerisureHub: login and token saving, lock and camera operations, service cache
 ├── test_humanize_panel_error.py    Turning the panel's raw error codes into readable notification text
-├── test_init.py                    Integration setup, session sharing, background discovery
+├── test_init.py                    Integration setup, session sharing, background discovery, entry migrations, Repairs issues
 ├── test_integration.py             Integration tests using MockGraphQLServer (see below)
 ├── test_ipv4_first.py              Connecting over IPv4 first, with a fallback (#606)
 ├── test_log_filter.py              SensitiveDataFilter: secret redaction, installation masking
@@ -1118,7 +1118,7 @@ tests/
 ├── test_refresh_crash_behaviour.py Client handling of the xSRefreshLogin crash (#557)
 ├── test_refresh_diagnostics.py     Logging that tells apart the causes of the #557 crash
 ├── test_responses.py               Pydantic response envelopes: validation, null safety
-└── test_services.py                VerisureOwaClient installation list and service catalog requests
+└── test_services.py                VerisureOwaClient installations, service catalog, sentinel and air quality, OTP, logout
 ```
 
 ### Key fixtures (`conftest.py`)
@@ -1258,7 +1258,7 @@ Paths are relative to `custom_components/securitas/`.
 | `pin_crypto.py` | `hash_pin`/`verify_pin` -- PBKDF2-HMAC-SHA256 hashing for the local alarm/lock PIN |
 | `migrate_unique_ids.py` | Rewrites pre-v5 entity unique_ids to the v5.0.2 `v4_securitas_direct.<num>_<type>` form |
 | `notification_translations.py` | Translations for persistent notifications and mobile push action labels |
-| `verisure_owa_api/client/_base.py` | `_ClientBase` -- auth lifecycle, headers, typed GraphQL execution (`_execute_graphql`), polling |
+| `verisure_owa_api/client/_base.py` | `_ClientBase` -- auth lifecycle, headers, typed GraphQL execution (`_execute_graphql`) and raw execution (`_execute_raw`), polling |
 | `verisure_owa_api/client/_auth.py` | Login, refresh, logout, 2FA device validation, OTP |
 | `verisure_owa_api/client/_alarm.py` | Arm, disarm, check, status, arming exceptions |
 | `verisure_owa_api/client/_installation.py` | Installation list and service catalog |
