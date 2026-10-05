@@ -1,4 +1,4 @@
-"""Tests for custom_components/verisure_owa/__init__.py."""
+"""Tests for custom_components/securitas/__init__.py."""
 
 import contextlib
 import hashlib

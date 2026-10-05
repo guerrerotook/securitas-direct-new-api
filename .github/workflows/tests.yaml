@@ -90,8 +90,8 @@ jobs:
         if: matrix.ha-channel == 'stable'
         run: |
           pip install --upgrade pip
-          # phcc pins the latest stable HA it supports — on Python 3.14 that is
-          # the 2026.6.x line. Just install normally.
+          # Installs the newest phcc release requirements_test.txt allows; phcc pins
+          # one exact HA version, which can be a beta. Just install normally.
           pip install -r requirements_test.txt
 
       - name: Install dependencies (minimum)

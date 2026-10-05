@@ -725,7 +725,7 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
    ```yaml
    action: logger.set_level
    data:
-     custom_components.verisure_owa: debug
+     custom_components.securitas: debug
    ```
 
    Then retrieve the logs from **Settings → System → Logs → three dots in the top right corner → Show full logs**.
