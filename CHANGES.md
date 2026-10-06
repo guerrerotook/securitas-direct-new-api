@@ -4,6 +4,10 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.10.0
 
+### Fixed
+
+- **Old activity entries were re-sent as new `verisure_owa_activity` events, in bursts** ([#639](https://github.com/guerrerotook/securitas-direct-new-api/issues/639)): with activity polling on, once the activity log held more than 30 entries, a poll that came back short made hidden older entries fire again, so automations re-ran for arm failures from weeks before. An entry now fires only the first time it is seen. Thanks to [@rpouetpouet](https://github.com/rpouetpouet) for the report and the diagnosis.
+
 ## v5.9.0
 
 ### Added

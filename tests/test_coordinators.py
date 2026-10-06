@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import DOMAIN, PROJECT_URL
 from custom_components.securitas.coordinators import (
+    _ACTIVITY_SEEN_IDS_LIMIT,
     ActivityCoordinator,
     ActivityData,
     AlarmCoordinator,
@@ -1532,7 +1533,7 @@ class TestActivityCoordinator:
 
     @pytest.mark.asyncio
     async def test_first_refresh_is_silent(self):
-        """First poll establishes the watermark — no events are flagged as new."""
+        """First poll establishes the baseline — no events are flagged as new."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
@@ -1671,7 +1672,7 @@ class TestActivityCoordinator:
 
     @pytest.mark.asyncio
     async def test_second_refresh_returns_only_new_entries(self):
-        """Only entries unseen in the previous poll are flagged as new."""
+        """Only entries whose ids haven't been seen before are flagged as new."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
@@ -1870,8 +1871,8 @@ class TestActivityCoordinator:
         assert by_id["859"].duplicate_of == "ha-disarmed"
 
     @pytest.mark.asyncio
-    async def test_third_refresh_uses_only_previous_poll_for_dedup(self):
-        """Watermark advances each poll — events from two polls ago aren't re-fired."""
+    async def test_third_refresh_flags_only_unseen_ids(self):
+        """Seen ids accumulate across polls — events from earlier polls aren't re-fired."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
@@ -1916,7 +1917,7 @@ class TestActivityCoordinator:
         result = await coord._async_update_data()
 
         # Even though `824172340` is numerically smaller than `16326008557`,
-        # it's a new event because its id wasn't in the previous poll.
+        # it's a new event because no earlier poll returned its id.
         assert result.new_events == [small_but_newer]
 
     @pytest.mark.asyncio
@@ -2352,3 +2353,122 @@ class TestActivityCoordinator:
         result = await coord._async_update_data()
 
         assert all(e.id_signal != "ha-abc" for e in result.new_events)
+
+    @pytest.mark.asyncio
+    async def test_injected_events_beyond_window_do_not_fire_on_short_poll(self):
+        """#639: a full injected store never replays when a poll comes back short.
+
+        Thirty injected events plus sixteen newer polled ones overflow the
+        thirty-row view, so the oldest injected rows are hidden. When a poll
+        returns nothing they come back into view and must not fire.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        coord._injected = [
+            _make_event(f"ha-{i:02}", time=f"2026-09-01 10:00:{59 - i:02}")
+            for i in range(30)
+        ]
+        polled = [
+            _make_event(str(1000 + i), time=f"2026-10-01 10:00:{59 - i:02}")
+            for i in range(16)
+        ]
+        client.get_activity.side_effect = [polled, []]
+
+        await coord._async_update_data()
+        result = await coord._async_update_data()
+
+        assert result.new_events == []
+
+    @pytest.mark.asyncio
+    async def test_polled_events_do_not_re_fire_after_a_short_poll(self):
+        """#639: entries missing from one poll don't fire when they reappear."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        ev_a = _make_event("100", time="2026-10-01 10:00:01")
+        ev_b = _make_event("200", time="2026-10-01 10:00:02")
+        ev_new = _make_event("300", time="2026-10-01 10:00:03")
+        client.get_activity.side_effect = [
+            [ev_b, ev_a],
+            [],
+            [ev_new, ev_b, ev_a],
+        ]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+        await coord._async_update_data()
+        result = await coord._async_update_data()
+
+        assert result.new_events == [ev_new]
+
+    @pytest.mark.asyncio
+    async def test_seen_ids_stay_bounded_without_forgetting_rows_in_view(self):
+        """The seen-id memory is capped, but a row still polled is never dropped."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        kept = _make_event("1", time="2026-10-01 00:00:00")
+        client.get_activity.side_effect = [[kept]] + [
+            [_make_event(str(1000 + i), time="2026-10-02 00:00:00"), kept]
+            for i in range(600)
+        ]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        fired: list[str] = []
+        for _ in range(601):
+            result = await coord._async_update_data()
+            fired += [ev.id_signal for ev in result.new_events]
+
+        assert "1" not in fired
+        assert len(fired) == 600
+        assert coord._seen_ids is not None
+        assert len(coord._seen_ids) <= _ACTIVITY_SEEN_IDS_LIMIT
+
+    @pytest.mark.asyncio
+    async def test_injections_between_polls_do_not_forget_a_polled_row(self):
+        """More injections than the seen-id limit never evict a row still polled."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        kept = _make_event("1", time="2026-10-06 12:01:00")
+        client.get_activity.side_effect = [[kept], [kept]]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        coord.async_set_updated_data(await coord._async_update_data())
+        for i in range(_ACTIVITY_SEEN_IDS_LIMIT):
+            coord.inject_event(_make_event(f"ha-{i}", time="2026-10-06 12:00:00"))
+        result = await coord._async_update_data()
+
+        assert result.new_events == []
+
+    @pytest.mark.asyncio
+    async def test_fetch_larger_than_seen_id_limit_does_not_re_fire(self):
+        """A fetch with more rows than the seen-id limit remembers all of them."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        rows = [
+            _make_event(
+                str(1000 + i), time=f"2026-10-01 {23 - i // 60:02}:{59 - i % 60:02}:00"
+            )
+            for i in range(_ACTIVITY_SEEN_IDS_LIMIT + 100)
+        ]
+        client.get_activity.side_effect = [rows, rows]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+        result = await coord._async_update_data()
+
+        assert result.new_events == []
