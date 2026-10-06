@@ -26,5 +26,5 @@
 // /securitas_panel/securitas-alarm-card.js entry from Settings →
 // Dashboards → Resources; the canonical /verisure-owa-panel/...js
 // resources are auto-registered by the integration.
-import "./verisure-owa-alarm-card.js?v=db68a0c8-5.9.1";
-import "./verisure-owa-alarm-chip.js?v=deea42b8-5.9.1";
+import "./verisure-owa-alarm-card.js?v=2f18b675-5.10.0";
+import "./verisure-owa-alarm-chip.js?v=644cc409-5.10.0";
