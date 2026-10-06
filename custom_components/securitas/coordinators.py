@@ -60,6 +60,12 @@ _DEFAULT_SENTINEL_INTERVAL = timedelta(minutes=30)
 _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
 _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
+# Ids seen on the activity timeline, kept apart from the 30-row view so a row
+# leaving the view and coming back never fires twice. Ids in the latest poll or
+# the injected store are never evicted. Forgetting older ids is safe because the
+# panel returns only its newest rows (about 30 a fetch), so an entry 500
+# distinct ids old won't come back.
+_ACTIVITY_SEEN_IDS_LIMIT = 500
 # How close (in time) a polled entry must be to an injected HA event of the
 # same category to be treated as the panel's echo of that HA action. Observed
 # skew between HA's clock and the panel's is a few seconds; 15s absorbs that
@@ -120,7 +126,7 @@ class ActivityData:
     """Data returned by ActivityCoordinator.
 
     `events` is the most recent fetch from the panel timeline.
-    `new_events` is the subset whose idSignal was not in the previous poll —
+    `new_events` is the subset whose idSignal no earlier poll returned —
     empty on the first poll so listeners don't get a flood of historical entries.
     """
 
@@ -841,9 +847,11 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
 class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
     """Coordinator for the alarm panel activity timeline (xSActV2).
 
-    Tracks idSignals seen in the previous poll so each refresh exposes a
-    `new_events` list of just-arrived entries.  The first poll establishes
-    the baseline silently — historical events are not flagged as new.
+    Remembers the most recently seen idSignals (about
+    _ACTIVITY_SEEN_IDS_LIMIT, never dropping one in the latest poll or the
+    injected store) so each refresh exposes a `new_events` list of
+    just-arrived entries.  The first poll establishes the baseline silently —
+    historical events are not flagged as new.
     """
 
     def __init__(
@@ -869,7 +877,13 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self._client = client
         self._queue = queue
         self.installation = installation
-        self._previous_ids: set[str] | None = None
+        # Insertion-ordered set, least recently seen first; None until the
+        # first poll has set the baseline.
+        self._seen_ids: dict[str, None] | None = None
+        # Every id the latest poll returned, uncapped; inject_event re-marks
+        # them so a burst of injections can't push a still-polled row out of
+        # _seen_ids.
+        self._polled_ids: list[str] = []
         # HA-synthesized events; merged with polled at the front of the timeline.
         # Persisted to disk so they survive HA restarts (load via
         # async_load_persisted, save automatically on inject_event).
@@ -946,14 +960,13 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self._mark_ha_echoes(self._injected, polled)
         merged = self._merge(self._injected, polled)
 
-        current_ids = {ev.id_signal for ev in merged}
         # update_interval is None ⇒ background polling off: every refresh is
         # on-demand (card-driven), so remote entries must never fire on the bus
         # — otherwise opening the card after a gap would replay a burst of stale
         # verisure_owa_activity events. The first poll also baselines silently.
-        # HA-injected events still fire live via inject_event regardless. The
-        # watermark advances either way so dedup stays correct.
-        if self._previous_ids is None or self.update_interval is None:
+        # HA-injected events fire live via inject_event, never from a poll.
+        # The seen ids advance either way so dedup stays correct.
+        if self._seen_ids is None or self.update_interval is None:
             new_events: list[ActivityEvent] = []
         else:
             # Probable duplicates of HA actions never fire — the injected event
@@ -961,11 +974,32 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
             new_events = [
                 ev
                 for ev in merged
-                if ev.id_signal not in self._previous_ids and ev.duplicate_of is None
+                if ev.id_signal not in self._seen_ids and ev.duplicate_of is None
             ]
-        self._previous_ids = current_ids
+        self._polled_ids = [ev.id_signal for ev in polled]
+        self._remember_seen(self._ids_to_keep())
 
         return ActivityData(events=merged, new_events=new_events)
+
+    def _ids_to_keep(self) -> list[str]:
+        """Ids never to forget: the injected store's and the latest poll's,
+        whether or not they fit the 30-row view."""
+        return [ev.id_signal for ev in self._injected] + self._polled_ids
+
+    def _remember_seen(self, ids: list[str]) -> None:
+        """Mark ``ids`` most recently seen, forgetting the stalest past the limit.
+
+        Never forgets an id in ``ids``: they sit at the back, and at most the
+        excess beyond ``max(limit, len(ids))`` is dropped from the front.
+        """
+        seen = self._seen_ids if self._seen_ids is not None else {}
+        for id_signal in ids:
+            seen.pop(id_signal, None)
+            seen[id_signal] = None
+        keep = max(_ACTIVITY_SEEN_IDS_LIMIT, len(ids))
+        for stale in list(seen)[: max(0, len(seen) - keep)]:
+            del seen[stale]
+        self._seen_ids = seen
 
     @staticmethod
     def _mark_ha_echoes(
@@ -1045,12 +1079,14 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
             else []
         )
         merged = self._merge(self._injected, prior_polled)
-        # Mark as already-seen so the next poll doesn't re-fire it as new.
+        # Re-mark the injected store and the latest poll's ids: the new event
+        # so the next poll doesn't re-fire it, the rest so a burst of
+        # injections can't push a still-polled row out of _seen_ids.
         # Only do so when the baseline is established — otherwise we'd
         # promote None ("first poll = baseline silently") into a real set
         # and the first poll would treat its polled rows as new.
-        if self._previous_ids is not None:
-            self._previous_ids = self._previous_ids | {event.id_signal}
+        if self._seen_ids is not None:
+            self._remember_seen(self._ids_to_keep())
         new_data = ActivityData(events=merged, new_events=[event])
         self.async_set_updated_data(new_data)
         # Schedule the persistence write asynchronously — don't block the
@@ -1089,8 +1125,8 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
             except Exception:  # pylint: disable=broad-exception-caught
                 continue
         self._injected = events[:_ACTIVITY_TIMELINE_WINDOW]
-        # Leave _previous_ids as None: the first poll's "baseline" branch
-        # (new_events=[] when _previous_ids is None) is what stops both the
+        # Leave _seen_ids as None: the first poll's "baseline" branch
+        # (new_events=[] when _seen_ids is None) is what stops both the
         # restored injected events and the polled history from firing as
         # bus events on the first post-restart update.
 
