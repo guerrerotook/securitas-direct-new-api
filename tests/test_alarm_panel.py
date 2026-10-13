@@ -11634,7 +11634,7 @@ def test_partial_disarm_finds_the_sub_panels_of_the_panels_own_entry():
 async def test_panel_commands_wait_as_long_as_the_entrys_own_timeout():
     """The hub's client is shared by every entry on the account and carries
     the first entry's operation timeout, so each command passes this entry's
-    own (#643)."""
+    own timeout (#643)."""
     alarm = make_alarm()
     alarm._config["operation_poll_timeout"] = 7
     alarm.client.arm_alarm = AsyncMock(return_value=_status("T"))
