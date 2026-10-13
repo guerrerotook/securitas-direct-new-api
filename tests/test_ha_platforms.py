@@ -1196,7 +1196,7 @@ class TestVerisureLockActions:
 
     async def test_lock_waits_as_long_as_its_entrys_own_timeout(self):
         """The hub's client carries the first entry's operation timeout, so
-        the lock passes its own entry's (#643)."""
+        the lock passes its own entry's timeout (#643)."""
         lock = make_lock(
             poll_status="2",
             config={"scan_interval": 120, CONF_OPERATION_POLL_TIMEOUT: 7},

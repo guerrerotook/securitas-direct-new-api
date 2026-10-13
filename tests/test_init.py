@@ -3220,7 +3220,7 @@ class TestLockConfigRetry:
 
     async def test_retry_waits_as_long_as_the_locks_entry_says(self, hass):
         """The shared hub's client carries the first entry's operation
-        timeout, so the retry passes the lock's own entry's (#643)."""
+        timeout, so the retry passes the lock's own entry's timeout (#643)."""
         from custom_components.securitas import _schedule_lock_config_retry
         from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
         from tests.test_ha_platforms import make_lock
@@ -3247,7 +3247,7 @@ class TestDiscoverLocks:
 
     async def test_lock_config_fetch_waits_as_long_as_the_entry_says(self):
         """The shared hub's client carries the first entry's operation
-        timeout, so discovery passes this entry's (#643)."""
+        timeout, so discovery passes this entry's timeout (#643)."""
         from custom_components.securitas import _discover_locks
         from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
         from custom_components.securitas.verisure_owa_api import (
