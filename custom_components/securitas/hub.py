@@ -342,6 +342,7 @@ class VerisureHub:
                     wait_for_fresh=True,
                 ),
                 priority=ApiQueue.FOREGROUND,
+                label="capture_image",
             )
 
             image_bytes = self._validate_and_store_image(
@@ -354,7 +355,6 @@ class VerisureHub:
             # spinner-clear condition requires capturing=False at that moment.
             self._camera_capturing.discard(capture_key)
 
-            # Push thumbnail into the camera coordinator so entities update
             self._update_camera_coordinator_thumbnail(
                 installation.number, device.zone_id, thumbnail
             )
@@ -440,7 +440,6 @@ class VerisureHub:
         if not full_bytes or not full_bytes.startswith(b"\xff\xd8"):
             return
 
-        # Push full image into the camera coordinator so entities update
         self._update_camera_coordinator_full_image(
             installation.number, camera_device.zone_id, full_bytes
         )
@@ -472,53 +471,56 @@ class VerisureHub:
             self.camera_timestamps[key] = thumbnail.timestamp
         return image_bytes
 
-    def _get_camera_coordinator(self, installation_number: str) -> Any | None:
-        """Return the installation's CameraCoordinator, if available.
+    def _camera_coordinators(self, installation_number: str) -> list[Any]:
+        """Return every CameraCoordinator for the installation that holds data.
 
         Searched across entries: the hub is shared by every entry on the
         account, and ``config_entry`` is only the one that signed in first.
+        Two entries can hold the same installation, and only one of them
+        owns the camera entities, so every match gets the update.
         """
+        coords = []
         for entry_data in self.hass.data.get(DOMAIN, {}).values():
             if not isinstance(entry_data, dict):
                 continue
             coord = entry_data.get("camera_coordinator")
-            if coord is not None and coord.installation.number == installation_number:
-                return coord
-        return None
+            if (
+                coord is not None
+                and coord.data is not None
+                and coord.installation.number == installation_number
+            ):
+                coords.append(coord)
+        return coords
 
     def _update_camera_coordinator_thumbnail(
         self, installation_number: str, zone_id: str, thumbnail: ThumbnailResponse
     ) -> None:
-        """Push a new thumbnail into the CameraCoordinator's data."""
+        """Push a new thumbnail into the installation's CameraCoordinators."""
         if thumbnail is None:
-            return
-        camera_coord = self._get_camera_coordinator(installation_number)
-        if camera_coord is None or camera_coord.data is None:
             return
         from .coordinators import CameraData
 
-        new_thumbnails = {**camera_coord.data.thumbnails, zone_id: thumbnail}
-        new_data = CameraData(
-            thumbnails=new_thumbnails,
-            full_images=dict(camera_coord.data.full_images),
-        )
-        camera_coord.async_set_updated_data(new_data)
+        for camera_coord in self._camera_coordinators(installation_number):
+            camera_coord.async_set_updated_data(
+                CameraData(
+                    thumbnails={**camera_coord.data.thumbnails, zone_id: thumbnail},
+                    full_images=dict(camera_coord.data.full_images),
+                )
+            )
 
     def _update_camera_coordinator_full_image(
         self, installation_number: str, zone_id: str, full_bytes: bytes
     ) -> None:
-        """Push a new full-resolution image into the CameraCoordinator's data."""
-        camera_coord = self._get_camera_coordinator(installation_number)
-        if camera_coord is None or camera_coord.data is None:
-            return
+        """Push a new full-resolution image into the installation's CameraCoordinators."""
         from .coordinators import CameraData
 
-        new_full_images = {**camera_coord.data.full_images, zone_id: full_bytes}
-        new_data = CameraData(
-            thumbnails=dict(camera_coord.data.thumbnails),
-            full_images=new_full_images,
-        )
-        camera_coord.async_set_updated_data(new_data)
+        for camera_coord in self._camera_coordinators(installation_number):
+            camera_coord.async_set_updated_data(
+                CameraData(
+                    thumbnails=dict(camera_coord.data.thumbnails),
+                    full_images={**camera_coord.data.full_images, zone_id: full_bytes},
+                )
+            )
 
     def get_camera_image(self, installation_number: str, zone_id: str) -> bytes | None:
         """Return the last captured image for a camera."""
@@ -632,7 +634,7 @@ class VerisureHub:
 
         ``on_start`` runs once the command leaves the queue: a caller
         cancelled before then sent nothing. ``poll_timeout`` is the calling
-        entry's: the client's own is the entry that signed in first.
+        entry's: the client's own is that of the entry that signed in first.
         """
         force_id = force_params.get("force_arming_remote_id")
         suid = force_params.get("suid")
@@ -664,6 +666,7 @@ class VerisureHub:
             partial(self.client.check_alarm, poll_timeout=poll_timeout),
             installation,
             priority=ApiQueue.FOREGROUND,
+            label="check_alarm",
         )
 
     async def disarm_alarm(
@@ -710,6 +713,7 @@ class VerisureHub:
             lock_state,
             device_id,
             priority=ApiQueue.FOREGROUND,
+            label="change_lock_mode",
         )
 
     async def get_lock_config(
@@ -718,6 +722,7 @@ class VerisureHub:
         device_id: str,
         *,
         priority: int = ApiQueue.FOREGROUND,
+        poll_timeout: float | None = None,
     ) -> SmartLock | None:
         """Fetch lock config, auto-detecting Smartlock vs Danalock API.
 
@@ -725,10 +730,11 @@ class VerisureHub:
         Returns SmartLock or None if both paths fail.
         """
         result = await self._api_queue.submit(
-            self.client.get_lock_config,
+            partial(self.client.get_lock_config, poll_timeout=poll_timeout),
             installation,
             device_id,
             priority=priority,
+            label="get_lock_config",
         )
         return result if result and result.res == "OK" else None
 
@@ -746,8 +752,3 @@ class VerisureHub:
     def services_cache(self) -> dict[str, list[Service]]:
         """Return the services cache."""
         return self._services_cache
-
-    @property
-    def get_config_entry(self) -> ConfigEntry | None:
-        """Return the config entry."""
-        return self.config_entry

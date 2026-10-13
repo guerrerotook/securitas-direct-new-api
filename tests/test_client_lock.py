@@ -698,3 +698,26 @@ async def test_a_callers_poll_timeout_overrides_the_clients(client, transport):
             client.change_lock_mode(_make_installation(), lock=True, poll_timeout=0.05),
             timeout=5,
         )
+
+
+async def test_a_callers_poll_timeout_bounds_the_danalock_config_fetch(
+    client, transport
+):
+    """The Danalock fallback polls, so it waits the caller's timeout rather
+    than the shared client's (#643)."""
+    responses = iter(
+        [smartlock_config_response(res="ERROR"), danalock_submit_response()]
+    )
+
+    async def _execute(*_args, **_kwargs):
+        return next(responses, None) or danalock_status_response(res="WAIT")
+
+    transport.execute.side_effect = _execute
+    client.poll_timeout = 60.0
+
+    result = await asyncio.wait_for(
+        client.get_lock_config(_make_installation(), poll_timeout=0.05),
+        timeout=5,
+    )
+
+    assert result == SmartLock()

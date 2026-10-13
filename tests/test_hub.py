@@ -485,6 +485,17 @@ class TestPollTimeoutPassThrough:
             installation, True, "device-1", poll_timeout=7.0
         )
 
+    async def test_get_lock_config(self):
+        hub = make_hub()
+        hub.client.get_lock_config = AsyncMock()
+        installation = make_installation()
+
+        await hub.get_lock_config(installation, "device-1", poll_timeout=7.0)
+
+        hub.client.get_lock_config.assert_awaited_once_with(
+            installation, "device-1", poll_timeout=7.0
+        )
+
 
 # ── change_lock_mode tests ──────────────────────────────────────────────────
 
@@ -704,6 +715,63 @@ class TestCaptureImage:
 
         first.async_set_updated_data.assert_not_called()
         second.async_set_updated_data.assert_called_once()
+
+    async def test_capture_updates_every_camera_coordinator_of_the_installation(
+        self,
+    ):
+        """Two entries can hold one installation, each with a camera
+        coordinator, while only one of them owns the camera entities. Which
+        comes first in hass.data depends on reload order, so a capture
+        updates both, with the thumbnail and then the full image."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation(number="222")
+        device = make_camera_device()
+        full_jpeg = b"\xff\xd8\xff\xe0full"
+        hub.client.capture_image = AsyncMock(
+            return_value=make_thumbnail(
+                id_signal="sig2",
+                image="base64data",
+                timestamp="2026-03-11 10:01:00",
+                signal_type="16",
+            )
+        )
+        hub.client.get_full_image = AsyncMock(return_value=full_jpeg)
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        def camera_coordinator(number):
+            coord = MagicMock()
+            coord.installation = make_installation(number=number)
+            coord.data = CameraData(thumbnails={}, full_images={})
+            return coord
+
+        other = camera_coordinator("111")
+        duplicate = camera_coordinator("222")
+        owner = camera_coordinator("222")
+        hub.hass.data = {
+            DOMAIN: {
+                "other_entry": {"camera_coordinator": other},
+                "duplicate_entry": {"camera_coordinator": duplicate},
+                "owner_entry": {"camera_coordinator": owner},
+            }
+        }
+        tasks = []
+        hub.hass.async_create_task = lambda coro, **_: (
+            tasks.append(asyncio.create_task(coro)) or tasks[-1]
+        )
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+            for task in tasks:
+                await task
+
+        other.async_set_updated_data.assert_not_called()
+        for coord in (duplicate, owner):
+            updates = [c.args[0] for c in coord.async_set_updated_data.call_args_list]
+            assert len(updates) == 2
+            assert device.zone_id in updates[0].thumbnails
+            assert updates[1].full_images[device.zone_id] == full_jpeg
 
     async def test_capturing_flag_cleared_before_coordinator_update(self):
         """is_capturing must be False when async_set_updated_data fires.

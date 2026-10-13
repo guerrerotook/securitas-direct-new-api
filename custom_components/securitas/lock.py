@@ -224,6 +224,11 @@ class VerisureLock(  # type: ignore[override]
         """Return the device ID."""
         return self._device_id
 
+    @property
+    def poll_timeout(self) -> float:
+        """Return this entry's operation timeout, in seconds."""
+        return self._poll_timeout
+
     def update_lock_config(self, lock_config: SmartLock) -> None:
         """Update lock configuration after deferred retry."""
         self._lock_config = lock_config

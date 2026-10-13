@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import (
+    CONF_OPERATION_POLL_TIMEOUT,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
+    DOMAIN,
+)
 from .coordinators import CameraCoordinator
 
 if TYPE_CHECKING:
@@ -141,6 +145,7 @@ def _schedule_lock_config_retry(
                 installation,
                 lock_entity.device_id,
                 priority=hub.api_queue.BACKGROUND,
+                poll_timeout=lock_entity.poll_timeout,
             )
         except Exception:  # pylint: disable=broad-exception-caught
             config = None
@@ -217,12 +222,19 @@ async def _discover_locks(
     lock_coordinator = entry_data.get("lock_coordinator")
     lock_add = entry_data.get("lock_add_entities")
     if lock_add and lock_coordinator is not None:
+        poll_timeout = float(
+            entry_data["config"].get(
+                CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+            )
+        )
         locks = []
         for mode in lock_modes:
             device_id = mode.device_id or SMARTLOCK_DEVICE_ID
             lock_config: SmartLock | None = None
             try:
-                lock_config = await hub.get_lock_config(installation, device_id)
+                lock_config = await hub.get_lock_config(
+                    installation, device_id, poll_timeout=poll_timeout
+                )
             except Exception:  # pylint: disable=broad-exception-caught
                 _LOGGER.debug(
                     "Could not fetch lock config for %s device %s",

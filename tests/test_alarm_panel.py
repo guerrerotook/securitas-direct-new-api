@@ -4451,17 +4451,18 @@ class TestCompoundArmCommands:
         the legacy rejection under THIS installation's slot rather than
         dropping it on the floor.
 
-        In production ``client.config["unsupported_commands"]`` is sourced
-        from ``entry.data["unsupported_commands"]`` (see ``__init__.py``'s
+        In production the panel's own entry config (``entry_data["config"]``)
+        carries ``unsupported_commands``, built from
+        ``entry.data["unsupported_commands"]`` (see ``__init__.py``'s
         setup hydration), so the legacy flat list is what the resolver
         starts pre-loaded with on the new build. By the time
         ``_persist_unsupported`` runs, the resolver already contains the
         legacy rejection plus any new one — and the write must reflect
         that union under the per-installation slot.
         """
-        # Mirror production: client.config + entry.data both carry the
-        # same legacy flat-list rejection. The resolver hydrates from
-        # client.config at __init__; entry.data is what _persist reads.
+        # Mirror production: the entry config and entry.data both carry the
+        # same legacy flat-list rejection. The resolver hydrates from the
+        # entry config at __init__; entry.data is what _persist reads.
         config = _night_peri_config()
         config["unsupported_commands"] = ["ARMHOME1"]
         alarm = make_alarm(config=config)
@@ -6259,7 +6260,7 @@ def _make_interior_panel(
     installation.address = "123 Test St"
 
     client = MagicMock()
-    client.config = {}
+    config = {}
 
     hass = MagicMock()
 
@@ -6272,7 +6273,7 @@ def _make_interior_panel(
         ),
     ):
         panel = InteriorVerisureOwaAlarmPanel(
-            installation, client, coordinator, client.config
+            installation, client, coordinator, config=config
         )
         panel.hass = hass
     panel.async_schedule_update_ha_state = MagicMock()
@@ -6314,7 +6315,7 @@ def _make_perimeter_panel(
     installation.address = "123 Test St"
 
     client = MagicMock()
-    client.config = {}
+    config = {}
 
     hass = MagicMock()
 
@@ -6329,7 +6330,7 @@ def _make_perimeter_panel(
         ),
     ):
         panel = PerimeterVerisureOwaAlarmPanel(
-            installation, client, coordinator, client.config
+            installation, client, coordinator, config=config
         )
         panel.hass = hass
         return panel
@@ -6555,7 +6556,7 @@ class TestInteriorSubPanel:
         assert not (feats & F.ARM_AWAY)
 
     def _make_subpanel_with_persisted_unsupported(self, persisted, installation_num):
-        """Build an InteriorVerisureOwaAlarmPanel where ``client.config`` has
+        """Build an InteriorVerisureOwaAlarmPanel whose entry ``config`` has
         the given ``unsupported_commands`` payload and the panel's
         ``installation.number`` is ``installation_num``.
 
@@ -6581,7 +6582,7 @@ class TestInteriorSubPanel:
         )
         installation = MagicMock(number=installation_num, alias="A", address="x")
         client = MagicMock()
-        client.config = {"unsupported_commands": persisted}
+        config = {"unsupported_commands": persisted}
         hass = MagicMock()
         with (
             patch.object(
@@ -6594,7 +6595,7 @@ class TestInteriorSubPanel:
             ),
         ):
             panel = InteriorVerisureOwaAlarmPanel(
-                installation, client, coordinator, client.config
+                installation, client, coordinator, config=config
             )
             panel.hass = hass
             return panel
@@ -6658,7 +6659,7 @@ class TestInteriorSubPanel:
         )
         installation = MagicMock(number="1", alias="A", address="x")
         client = MagicMock()
-        client.config = {}  # no unsupported_commands key at all
+        config = {}  # no unsupported_commands key at all
         hass = MagicMock()
         with (
             patch.object(
@@ -6671,7 +6672,7 @@ class TestInteriorSubPanel:
             ),
         ):
             panel = InteriorVerisureOwaAlarmPanel(
-                installation, client, coordinator, client.config
+                installation, client, coordinator, config=config
             )
             panel.hass = hass
         assert panel._resolver.unsupported == frozenset()
@@ -6960,7 +6961,7 @@ def _make_annex_panel(
     installation.address = "123 Test St"
 
     client = MagicMock()
-    client.config = {}
+    config = {}
 
     hass = MagicMock()
 
@@ -6971,7 +6972,7 @@ def _make_annex_panel(
         patch.object(AnnexVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()),
     ):
         panel = AnnexVerisureOwaAlarmPanel(
-            installation, client, coordinator, client.config
+            installation, client, coordinator, config=config
         )
         panel.hass = hass
         return panel
@@ -7390,7 +7391,7 @@ class TestSubPanelSetup:
         device.installation = installation
 
         client = MagicMock()
-        client.config = {
+        config = {
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
@@ -7410,7 +7411,7 @@ class TestSubPanelSetup:
                     "hub": client,
                     "alarm_coordinator": coordinator,
                     "devices": [device],
-                    "config": client.config,
+                    "config": config,
                 },
             },
         }
@@ -8929,19 +8930,15 @@ class TestSubPanelEntityIdHealer:
 class TestCombinedPanelRegistration:
     """Tests that async_setup_entry stores combined panels in entry_data keyed by installation number."""
 
-    def _make_client(self):
-        from unittest.mock import MagicMock
-
+    def _make_config(self):
         from custom_components.securitas.verisure_owa_api.const import STD_DEFAULTS
 
-        client = MagicMock()
-        client.config = {
+        return {
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
             "scan_interval": 120,
         }
-        return client
 
     def _make_device(self, number, alias):
         from custom_components.securitas.hub import VerisureDevice
@@ -9007,8 +9004,8 @@ class TestCombinedPanelRegistration:
         coordinator.has_annex = False
 
         entry_data = {
-            "hub": (client := self._make_client()),
-            "config": client.config,
+            "hub": MagicMock(),
+            "config": self._make_config(),
             "alarm_coordinator": coordinator,
             "devices": [device_a, device_b],
         }
@@ -9057,8 +9054,8 @@ class TestCombinedPanelRegistration:
         coordinator.has_annex = False
 
         entry_data = {
-            "hub": (client := self._make_client()),
-            "config": client.config,
+            "hub": MagicMock(),
+            "config": self._make_config(),
             "alarm_coordinator": coordinator,
             "devices": [device],
         }

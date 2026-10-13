@@ -1154,7 +1154,7 @@ class TestBuildConfigDict:
         assert not verify_pin("1111", config[CONF_CODE_HASH])
 
     def test_lock_code_required_from_options(self):
-        """The lock PIN toggle set in options reaches the client config."""
+        """The lock PIN toggle set in options reaches the entry's config."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             data=make_config_entry_data(),
@@ -3217,6 +3217,62 @@ class TestLockConfigRetry:
         lock_entity.async_on_remove.assert_called_once_with(cancel)
         own_entry.async_on_unload.assert_called_once_with(cancel)
         hub.config_entry.async_on_unload.assert_not_called()
+
+    async def test_retry_waits_as_long_as_the_locks_entry_says(self, hass):
+        """The shared hub's client carries the first entry's operation
+        timeout, so the retry passes the lock's own entry's (#643)."""
+        from custom_components.securitas import _schedule_lock_config_retry
+        from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
+        from tests.test_ha_platforms import make_lock
+
+        hub = make_securitas_hub_mock()
+        hub.api_queue = MagicMock()
+        hub.get_lock_config = AsyncMock(return_value=None)
+        lock_entity = make_lock(
+            config={"scan_interval": 120, CONF_OPERATION_POLL_TIMEOUT: 7}
+        )
+        lock_entity.async_on_remove = MagicMock()
+        installation = make_installation()
+
+        with patch("homeassistant.helpers.event.async_call_later") as call_later:
+            _schedule_lock_config_retry(hass, hub, installation, lock_entity)
+            retry = call_later.call_args.args[2]
+            await retry(None)
+
+        assert hub.get_lock_config.await_args.kwargs["poll_timeout"] == 7.0
+
+
+class TestDiscoverLocks:
+    """Tests for lock discovery."""
+
+    async def test_lock_config_fetch_waits_as_long_as_the_entry_says(self):
+        """The shared hub's client carries the first entry's operation
+        timeout, so discovery passes this entry's (#643)."""
+        from custom_components.securitas import _discover_locks
+        from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
+        from custom_components.securitas.verisure_owa_api import (
+            SmartLock,
+            SmartLockMode,
+        )
+
+        hub = make_securitas_hub_mock()
+        hub.api_queue = MagicMock()
+        hub.get_services = AsyncMock(return_value=[MagicMock(request="DOORLOCK")])
+        hub.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lock_status="2", device_id="01")]
+        )
+        hub.get_lock_config = AsyncMock(return_value=SmartLock(res="OK"))
+        entry_data = {
+            "config": {CONF_OPERATION_POLL_TIMEOUT: 7},
+            "lock_coordinator": MagicMock(),
+            "lock_add_entities": MagicMock(),
+        }
+
+        with patch("custom_components.securitas.lock.VerisureLock"):
+            await _discover_locks(MagicMock(), hub, make_installation(), entry_data)
+
+        hub.get_lock_config.assert_awaited_once()
+        assert hub.get_lock_config.await_args.kwargs["poll_timeout"] == 7.0
 
 
 # ===========================================================================

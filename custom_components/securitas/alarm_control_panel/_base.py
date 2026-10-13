@@ -234,8 +234,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Initialize the Verisure alarm panel.
 
         ``config`` is this entry's settings: the hub is shared by every entry
-        signed in to the same account, so its own ``config`` is whichever
-        entry signed in first (#643).
+        signed in to the same account, so its own ``config`` is that of
+        whichever entry signed in first (#643).
         """
         CoordinatorEntity.__init__(self, coordinator)  # type: ignore[arg-type]
         VerisureEntity.__init__(self, installation, client)

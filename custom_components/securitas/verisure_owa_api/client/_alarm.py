@@ -405,7 +405,8 @@ class _AlarmMixin(_ClientBase):
         Returns an empty list when neither ``reference_id`` nor ``suid`` is
         given: xSGetExceptions has nothing to look up without a reference, and
         would otherwise poll on WAIT for the full poll timeout before raising
-        OperationTimeoutError (#553).
+        OperationTimeoutError (#553). ``poll_timeout`` overrides the
+        client's for this fetch.
         """
         if not reference_id and not suid:
             return []
