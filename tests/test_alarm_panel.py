@@ -260,7 +260,7 @@ class TestForceArmNotificationsConfig:
     def test_make_alarm_default_notifications_enabled(self):
         """By default, force_arm_notifications is True in config."""
         alarm = make_alarm()
-        assert alarm.client.config.get("force_arm_notifications", True) is True
+        assert alarm._config.get("force_arm_notifications", True) is True
 
     def test_make_alarm_notifications_disabled(self):
         """force_arm_notifications=False is passed through config."""
@@ -273,7 +273,7 @@ class TestForceArmNotificationsConfig:
                 "force_arm_notifications": False,
             }
         )
-        assert alarm.client.config.get("force_arm_notifications") is False
+        assert alarm._config.get("force_arm_notifications") is False
 
     def test_auto_force_arm_constants_exist(self):
         """Config constants for auto_force_arm are defined."""
@@ -354,8 +354,8 @@ class TestForceArmNotificationsConfig:
     async def test_handler_creates_notifications_when_enabled(self):
         """Built-in handler creates persistent + mobile notifications when enabled."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -399,8 +399,8 @@ class TestForceArmNotificationsConfig:
     async def test_handler_skips_notifications_when_disabled(self):
         """No notifications when force_arm_notifications is False."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = False
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = False
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -428,7 +428,7 @@ class TestForceArmNotificationsConfig:
         path no longer touches force context (see TestForceArmExpiryTimer).
         """
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = False
+        alarm._config["force_arm_notifications"] = False
         alarm._force_context = {
             "reference_id": "ref-123",
             "suid": "suid-123",
@@ -452,7 +452,7 @@ class TestForceArmNotificationsConfig:
     async def test_force_arm_no_dismiss_when_disabled(self):
         """When notifications disabled, force_arm skips notification dismissal."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = False
+        alarm._config["force_arm_notifications"] = False
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._force_context = {
             "reference_id": "ref-456",
@@ -491,7 +491,7 @@ class TestForceArmNotificationsConfig:
         prompt (which the auto-force would immediately dismiss).
         """
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         event = MagicMock()
         event.data = {"entity_id": alarm.entity_id, "zones": ["Kitchen Door"]}
 
@@ -508,7 +508,7 @@ class TestForceArmNotificationsConfig:
     @staticmethod
     def _force_context_alarm():
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._force_context = {
             "reference_id": "ref-1",
@@ -584,8 +584,8 @@ class TestForceArmNotificationsConfig:
         """The confirmation lists the bypassed sensors (persistent + mobile) under
         a dedicated notification id."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm.hass.services.async_call = AsyncMock()
 
         await alarm._async_notify_force_armed(
@@ -640,7 +640,6 @@ def make_alarm(
         config["code_hash"], config["code_is_numeric"] = encode_pin(code)
 
     client = MagicMock()
-    client.config = config
     client.session = AsyncMock()
     client.arm_alarm = AsyncMock()
     client.disarm_alarm = AsyncMock()
@@ -680,6 +679,7 @@ def make_alarm(
     coordinator.has_peri = has_peri
     coordinator.has_annex = False
     coordinator.operation = InstallationOperation()
+    coordinator.config_entry = MagicMock()
 
     if initial_status is None:
         initial_status = OperationStatus(
@@ -700,6 +700,7 @@ def make_alarm(
             installation=installation,
             client=client,
             coordinator=coordinator,
+            config=config,
         )
         alarm.hass = hass
     # Apply the initial status to set default state (e.g. DISARMED)
@@ -1104,6 +1105,7 @@ class TestAsyncAlarmDisarm:
             alarm.installation,
             STATE_TO_COMMAND[VerisureOwaState.DISARMED],
             on_start=ANY,
+            poll_timeout=ANY,
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -1159,7 +1161,7 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_disarm_with_peri_configured_but_not_armed_uses_darm1(self):
@@ -1186,7 +1188,7 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
 
@@ -1245,7 +1247,7 @@ class TestSetArmState:
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
         alarm.client.arm_alarm.assert_called_once()
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
@@ -2287,7 +2289,7 @@ class TestForceArmContext:
         before firing).
         """
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._force_context = {
             "reference_id": "ref-stale",
@@ -2325,7 +2327,7 @@ class TestForceArmContext:
     async def test_arming_exception_sends_persistent_notification(self):
         """ArmingExceptionError triggers async notification helper via event handler."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -2358,8 +2360,8 @@ class TestForceArmContext:
     async def test_arming_exception_notifies_configured_group(self):
         """ArmingExceptionError schedules async helper which dispatches both notifications."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -2391,7 +2393,7 @@ class TestForceArmContext:
     async def test_arming_exception_no_notify_group_only_persistent(self):
         """Without notify_group configured, only persistent notification fires via handler."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -2634,7 +2636,7 @@ class TestForceArmExpiredEventFire:
     async def test_event_fires_even_when_notifications_disabled(self):
         """Events are the public API and fire regardless of the notification toggle."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = False
+        alarm._config["force_arm_notifications"] = False
         alarm._force_context = self._expired_context()
 
         await alarm._async_handle_force_arm_expiry(datetime.now())
@@ -2869,7 +2871,7 @@ class TestSuppressedPromptFallback:
     @staticmethod
     def _make_panel(*, allow_forcing: bool = True):
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.DISARMED
         alarm.hass.services.async_call = AsyncMock()
         pending: list = []
@@ -3046,7 +3048,7 @@ class TestSuppressedPromptFallback:
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
 
-        alarm.client.config["force_arm_notifications"] = False
+        alarm._config["force_arm_notifications"] = False
         await timers.advance(self._WAIT)
         await self._drain(alarm)
 
@@ -3166,8 +3168,8 @@ class TestForceArmExpiredMobileNotification:
         notify call with the same tag and no actions array."""
         alarm = make_alarm()
         alarm.hass.services.async_call = AsyncMock()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
         # Make entity_id match the event payload
         ev = self._make_event(entity_id=alarm.entity_id)
 
@@ -3197,7 +3199,7 @@ class TestForceArmExpiredMobileNotification:
     async def test_handler_no_op_without_notify_group(self):
         """Without a notify_group configured, no mobile notify call fires."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
+        alarm._config["force_arm_notifications"] = True
         # Explicitly no notify_group set
         ev = self._make_event(entity_id=alarm.entity_id)
 
@@ -3210,8 +3212,8 @@ class TestForceArmExpiredMobileNotification:
     async def test_handler_no_op_when_notifications_disabled(self):
         """force_arm_notifications=False suppresses the mobile call."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = False
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = False
+        alarm._config["notify_group"] = "mobile_app_phone"
         ev = self._make_event(entity_id=alarm.entity_id)
 
         await alarm._async_notify_force_arm_expired_mobile(ev)
@@ -3223,8 +3225,8 @@ class TestForceArmExpiredMobileNotification:
     async def test_handler_skips_event_for_other_entity(self):
         """Handler ignores events whose entity_id does not match self."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
         ev = self._make_event(entity_id="alarm_control_panel.different")
 
         await alarm._async_notify_force_arm_expired_mobile(ev)
@@ -3251,8 +3253,8 @@ class TestForceArmExpiredHandlerRegistration:
     async def test_handler_dedupes_via_event_id(self):
         """A repeated _event_id triggers the handler at most once."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
 
         alarm._register_arming_exception_handler()
 
@@ -3813,8 +3815,8 @@ class TestArmingExceptionDismissedHandler:
 
     def test_handler_dismisses_when_enabled(self):
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
 
         alarm._register_arming_exception_handler()
 
@@ -3836,7 +3838,7 @@ class TestArmingExceptionDismissedHandler:
 
     def test_handler_skips_when_disabled(self):
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = False
+        alarm._config["force_arm_notifications"] = False
 
         alarm._register_arming_exception_handler()
         # No listener even registered when disabled — async_added_to_hass
@@ -3863,8 +3865,8 @@ class TestArmingExceptionDismissedHandler:
 
     def test_handler_skips_event_for_other_entity(self):
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
 
         alarm._register_arming_exception_handler()
 
@@ -4211,7 +4213,7 @@ class TestCompoundArmCommands:
         await alarm.async_alarm_arm_night()
 
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY
+            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY, poll_timeout=ANY
         )
         assert len(alarm._resolver.unsupported) == 0
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
@@ -4280,6 +4282,7 @@ class TestCompoundArmCommands:
             "force_arming_remote_id": "ref-123",
             "suid": "suid-456",
             "on_start": ANY,
+            "poll_timeout": ANY,
         }
         assert len(calls) == 2
         assert calls[0][1] == expected_params
@@ -4416,7 +4419,7 @@ class TestCompoundArmCommands:
 
         entry = MagicMock()
         entry.data = {"username": "u", "country": "IT"}
-        alarm._client.config_entry = entry
+        alarm.coordinator.config_entry = entry
         alarm.hass.config_entries = MagicMock()
 
         alarm.client.arm_alarm = AsyncMock(
@@ -4448,17 +4451,18 @@ class TestCompoundArmCommands:
         the legacy rejection under THIS installation's slot rather than
         dropping it on the floor.
 
-        In production ``client.config["unsupported_commands"]`` is sourced
-        from ``entry.data["unsupported_commands"]`` (see ``__init__.py``'s
+        In production the panel's own entry config (``entry_data["config"]``)
+        carries ``unsupported_commands``, built from
+        ``entry.data["unsupported_commands"]`` (see ``__init__.py``'s
         setup hydration), so the legacy flat list is what the resolver
         starts pre-loaded with on the new build. By the time
         ``_persist_unsupported`` runs, the resolver already contains the
         legacy rejection plus any new one — and the write must reflect
         that union under the per-installation slot.
         """
-        # Mirror production: client.config + entry.data both carry the
-        # same legacy flat-list rejection. The resolver hydrates from
-        # client.config at __init__; entry.data is what _persist reads.
+        # Mirror production: the entry config and entry.data both carry the
+        # same legacy flat-list rejection. The resolver hydrates from the
+        # entry config at __init__; entry.data is what _persist reads.
         config = _night_peri_config()
         config["unsupported_commands"] = ["ARMHOME1"]
         alarm = make_alarm(config=config)
@@ -4471,7 +4475,7 @@ class TestCompoundArmCommands:
             "country": "IT",
             "unsupported_commands": ["ARMHOME1"],  # legacy rejection
         }
-        alarm._client.config_entry = entry
+        alarm.coordinator.config_entry = entry
         alarm.hass.config_entries = MagicMock()
 
         alarm.client.arm_alarm = AsyncMock(
@@ -4507,7 +4511,7 @@ class TestCompoundArmCommands:
                 "999999": ["ARMDAY1"],  # sibling installation's rejections
             },
         }
-        alarm._client.config_entry = entry
+        alarm.coordinator.config_entry = entry
         alarm.hass.config_entries = MagicMock()
 
         alarm.client.arm_alarm = AsyncMock(
@@ -4615,7 +4619,7 @@ class TestCompoundArmCommands:
 
         # Should only try ARMNIGHT1PERI1 once — NOT fall back to multi-step
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY
+            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY, poll_timeout=ANY
         )
         assert "ARMNIGHT1PERI1" not in alarm._resolver.unsupported
 
@@ -4751,7 +4755,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -4859,7 +4863,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_no_peri_config_uses_darm1(self):
@@ -4873,7 +4877,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unsupported_combined_skips_to_darm1(self):
@@ -4897,7 +4901,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_both_disarm_attempts_fail(self):
@@ -4939,7 +4943,7 @@ class TestDynamicDisarm:
 
         # Should only try DARM1DARMPERI once — NOT fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         # Error placeholder carries clean API message, no full args dump
         mock_notify.assert_called_once()
@@ -5026,7 +5030,7 @@ class TestExecuteTransition:
             AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         )
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_disarm_compound_fallback_to_darm1(self):
@@ -5087,7 +5091,7 @@ class TestExecuteTransition:
             )
         # Only tried first command, didn't fall back
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
 
@@ -5104,7 +5108,7 @@ class TestExecuteTransition:
             )
         # Only tried first command, didn't fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         # Not marked as unsupported — error was transient
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
@@ -5136,10 +5140,10 @@ class TestExecuteTransition:
             AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF)
         )
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1", on_start=ANY
+            alarm.installation, "ARMNIGHT1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_arm_total_peri_multi_step(self):
@@ -5251,7 +5255,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unknown_letter_sends_compound_disarm_with_peri(self):
@@ -5264,7 +5268,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_none_proto_code_sends_disarm(self):
@@ -5278,7 +5282,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unknown_state_never_arms(self):
@@ -5330,7 +5334,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
             await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
         mock_notify.assert_not_called()
         assert alarm._state == AlarmControlPanelState.DISARMED
@@ -5679,7 +5683,7 @@ class TestNotificationContent:
     async def test_mobile_notification_has_tag(self):
         """Mobile notification includes the per-installation tag."""
         alarm = self._alarm_with_async_call()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         event = self._make_event()
 
         with patch(
@@ -5699,7 +5703,7 @@ class TestNotificationContent:
     async def test_mobile_notification_action_buttons_translated(self):
         """Mobile action button titles come from translations."""
         alarm = self._alarm_with_async_call()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         event = self._make_event()
 
         with patch(
@@ -5723,7 +5727,7 @@ class TestNotificationContent:
     async def test_non_forceable_notification_has_sensor_warning_without_actions(self):
         """Spain panels that prohibit forcing still notify with zone names."""
         alarm = self._alarm_with_async_call()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         event = self._make_event(zones=["Kitchen", "Bedroom", "Office"])
         event.data["allow_forcing"] = False
 
@@ -5750,7 +5754,7 @@ class TestNotificationContent:
     async def test_mobile_notification_short_message(self):
         """Mobile message is shorter than persistent message and contains sensor alias."""
         alarm = self._alarm_with_async_call()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         event = self._make_event()
 
         with patch(
@@ -5770,7 +5774,7 @@ class TestNotificationContent:
     async def test_notification_multiple_sensors(self):
         """Multiple sensors appear in both persistent and mobile notifications."""
         alarm = self._alarm_with_async_call()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
         with patch(
@@ -5792,7 +5796,7 @@ class TestNotificationContent:
     async def test_notification_sensor_alias_fallback(self):
         """Empty zones list shows 'unknown sensor' fallback in notification."""
         alarm = self._alarm_with_async_call()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         event = self._make_event(zones=[])
 
         with patch(
@@ -5861,7 +5865,7 @@ class TestDismissNotification:
     def test_dismiss_mobile_notification_with_notify_group(self):
         """With notify_group, dismiss also sends clear_notification to mobile."""
         alarm = make_alarm()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
 
         alarm._dismiss_arming_exception_notification()
 
@@ -5886,7 +5890,7 @@ class TestDismissNotification:
     async def test_force_arm_cancel_dismisses_both(self):
         """async_force_arm_cancel dismisses both persistent and mobile notifications."""
         alarm = make_alarm()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._force_context = {
             "reference_id": "ref-123",
             "suid": "suid-123",
@@ -5989,8 +5993,8 @@ class TestForceArmWorkflow:
     async def test_full_force_arm_workflow(self):
         """Full workflow: arm fails -> event handler schedules notifications -> force arm succeeds."""
         alarm = make_alarm()
-        alarm.client.config["force_arm_notifications"] = True
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["force_arm_notifications"] = True
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -6076,7 +6080,7 @@ class TestForceArmWorkflow:
     async def test_full_cancel_workflow(self):
         """Full workflow: arm fails -> user cancels -> context cleared."""
         alarm = make_alarm()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -6121,7 +6125,7 @@ class TestForceArmWorkflow:
     async def test_force_arm_after_status_refresh(self):
         """Force context survives an immediate status refresh and force arm succeeds."""
         alarm = make_alarm()
-        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._last_state = AlarmControlPanelState.DISARMED
 
@@ -6256,7 +6260,7 @@ def _make_interior_panel(
     installation.address = "123 Test St"
 
     client = MagicMock()
-    client.config = {}
+    config = {}
 
     hass = MagicMock()
 
@@ -6268,7 +6272,9 @@ def _make_interior_panel(
             InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel = InteriorVerisureOwaAlarmPanel(
+            installation, client, coordinator, config=config
+        )
         panel.hass = hass
     panel.async_schedule_update_ha_state = MagicMock()
     panel.async_write_ha_state = MagicMock()
@@ -6309,7 +6315,7 @@ def _make_perimeter_panel(
     installation.address = "123 Test St"
 
     client = MagicMock()
-    client.config = {}
+    config = {}
 
     hass = MagicMock()
 
@@ -6323,7 +6329,9 @@ def _make_perimeter_panel(
             PerimeterVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        panel = PerimeterVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel = PerimeterVerisureOwaAlarmPanel(
+            installation, client, coordinator, config=config
+        )
         panel.hass = hass
         return panel
 
@@ -6355,7 +6363,7 @@ class TestSubPanelDisarmFromUnknownState:
         await panel._execute_transition(target)
 
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARM1", on_start=ANY
+            panel.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_perimeter_subpanel_disarms_only_perimeter(self):
@@ -6371,7 +6379,7 @@ class TestSubPanelDisarmFromUnknownState:
         await panel._execute_transition(target)
 
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARMPERI", on_start=ANY
+            panel.installation, "DARMPERI", on_start=ANY, poll_timeout=ANY
         )
 
 
@@ -6548,7 +6556,7 @@ class TestInteriorSubPanel:
         assert not (feats & F.ARM_AWAY)
 
     def _make_subpanel_with_persisted_unsupported(self, persisted, installation_num):
-        """Build an InteriorVerisureOwaAlarmPanel where ``client.config`` has
+        """Build an InteriorVerisureOwaAlarmPanel whose entry ``config`` has
         the given ``unsupported_commands`` payload and the panel's
         ``installation.number`` is ``installation_num``.
 
@@ -6574,7 +6582,7 @@ class TestInteriorSubPanel:
         )
         installation = MagicMock(number=installation_num, alias="A", address="x")
         client = MagicMock()
-        client.config = {"unsupported_commands": persisted}
+        config = {"unsupported_commands": persisted}
         hass = MagicMock()
         with (
             patch.object(
@@ -6586,7 +6594,9 @@ class TestInteriorSubPanel:
                 InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
             ),
         ):
-            panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+            panel = InteriorVerisureOwaAlarmPanel(
+                installation, client, coordinator, config=config
+            )
             panel.hass = hass
             return panel
 
@@ -6649,7 +6659,7 @@ class TestInteriorSubPanel:
         )
         installation = MagicMock(number="1", alias="A", address="x")
         client = MagicMock()
-        client.config = {}  # no unsupported_commands key at all
+        config = {}  # no unsupported_commands key at all
         hass = MagicMock()
         with (
             patch.object(
@@ -6661,7 +6671,9 @@ class TestInteriorSubPanel:
                 InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
             ),
         ):
-            panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+            panel = InteriorVerisureOwaAlarmPanel(
+                installation, client, coordinator, config=config
+            )
             panel.hass = hass
         assert panel._resolver.unsupported == frozenset()
 
@@ -6949,7 +6961,7 @@ def _make_annex_panel(
     installation.address = "123 Test St"
 
     client = MagicMock()
-    client.config = {}
+    config = {}
 
     hass = MagicMock()
 
@@ -6959,7 +6971,9 @@ def _make_annex_panel(
         ),
         patch.object(AnnexVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()),
     ):
-        panel = AnnexVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel = AnnexVerisureOwaAlarmPanel(
+            installation, client, coordinator, config=config
+        )
         panel.hass = hass
         return panel
 
@@ -7377,7 +7391,7 @@ class TestSubPanelSetup:
         device.installation = installation
 
         client = MagicMock()
-        client.config = {
+        config = {
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
@@ -7397,6 +7411,7 @@ class TestSubPanelSetup:
                     "hub": client,
                     "alarm_coordinator": coordinator,
                     "devices": [device],
+                    "config": config,
                 },
             },
         }
@@ -7926,7 +7941,7 @@ class TestExecutePartialDisarm:
 
         assert ok is True
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARM1", on_start=ANY
+            panel.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unknown_state_disarm_never_arms(self):
@@ -8027,7 +8042,7 @@ class TestExecutePartialDisarm:
 
         # Wire entry_data so the combined panel can find the sub-panel.
         entry_id = "entry-test"
-        panel._client.config_entry = MagicMock(entry_id=entry_id)
+        panel.coordinator.config_entry = MagicMock(entry_id=entry_id)
         panel.hass.data = {
             DOMAIN: {
                 entry_id: {
@@ -8915,19 +8930,15 @@ class TestSubPanelEntityIdHealer:
 class TestCombinedPanelRegistration:
     """Tests that async_setup_entry stores combined panels in entry_data keyed by installation number."""
 
-    def _make_client(self):
-        from unittest.mock import MagicMock
-
+    def _make_config(self):
         from custom_components.securitas.verisure_owa_api.const import STD_DEFAULTS
 
-        client = MagicMock()
-        client.config = {
+        return {
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
             "scan_interval": 120,
         }
-        return client
 
     def _make_device(self, number, alias):
         from custom_components.securitas.hub import VerisureDevice
@@ -8993,7 +9004,8 @@ class TestCombinedPanelRegistration:
         coordinator.has_annex = False
 
         entry_data = {
-            "hub": self._make_client(),
+            "hub": MagicMock(),
+            "config": self._make_config(),
             "alarm_coordinator": coordinator,
             "devices": [device_a, device_b],
         }
@@ -9042,7 +9054,8 @@ class TestCombinedPanelRegistration:
         coordinator.has_annex = False
 
         entry_data = {
-            "hub": self._make_client(),
+            "hub": MagicMock(),
+            "config": self._make_config(),
             "alarm_coordinator": coordinator,
             "devices": [device],
         }
@@ -9088,7 +9101,9 @@ class TestAsyncManualRefresh:
 
         await alarm.async_manual_refresh()
 
-        alarm._client.refresh_alarm_status.assert_awaited_once_with(alarm._installation)
+        alarm._client.refresh_alarm_status.assert_awaited_once_with(
+            alarm._installation, poll_timeout=ANY
+        )
 
     async def test_updates_protom_response_on_success(self):
         from custom_components.securitas.verisure_owa_api.models import OperationStatus
@@ -9673,7 +9688,7 @@ async def test_partial_disarm_unexpected_exit_rolls_back_and_frees_panels(error)
     interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
     interior.coordinator = panel.coordinator
     setup_alarm_entry_data(panel, sub_panels=[interior])
-    panel._client.config_entry = MagicMock(entry_id="entry-id-1")
+    panel.coordinator.config_entry = MagicMock(entry_id="entry-id-1")
     panel.update_status_alarm(_status("T"))
     panel.coordinator.record_confirmed_proto_code("T")
     panel._state = AlarmControlPanelState.ARMED_AWAY
@@ -9825,7 +9840,7 @@ async def test_partial_disarm_gives_up_behind_a_stuck_operation():
     alarm = make_alarm()
     alarm.update_status_alarm(_status("T"))
     alarm.coordinator.record_confirmed_proto_code("T")
-    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
+    alarm._config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
     _record_transitions(alarm)
     alarm.coordinator.operation.begin("arm", [alarm])
 
@@ -9865,7 +9880,7 @@ async def test_disarm_gives_up_waiting_behind_a_stuck_operation(caplog):
     from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
 
     alarm = make_alarm()
-    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
+    alarm._config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
     _record_transitions(alarm)
     alarm.coordinator.operation.begin("arm", [alarm])  # an arm that never ends
 
@@ -9933,7 +9948,7 @@ def _main_and_interior_panels(has_peri=False):
     interior.hass = main.hass
     main.coordinator.alarm_state = PROTO_TO_ALARM_STATE["D"]  # polled: disarmed
     setup_alarm_entry_data(main, sub_panels=[interior])
-    main._client.config_entry = MagicMock(entry_id="entry-id-1")
+    main.coordinator.config_entry = MagicMock(entry_id="entry-id-1")
     lock = make_lock(initial_status="2", poll_status="1")
     lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
     lock._unlock_disarms_circuits = ["interior"]
@@ -10425,6 +10440,7 @@ def _sub_panel_sharing(main, panel_cls):
             installation=main.installation,
             client=main.client,
             coordinator=main.coordinator,
+            config=main._config,
         )
     panel.hass = main.hass
     panel.async_write_ha_state = MagicMock()
@@ -10648,7 +10664,7 @@ async def test_arm_gives_up_behind_a_stuck_operation():
     from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
 
     alarm = make_alarm()
-    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
+    alarm._config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
     _record_transitions(alarm)
     alarm.coordinator.operation.begin("disarm", [object()])  # never ends
 
@@ -10911,7 +10927,9 @@ async def test_arm_again_after_an_unconfirmed_arm_asks_the_panel_then_arms():
 
     await alarm.set_arm_state("armed_away")
 
-    alarm._client.refresh_alarm_status.assert_awaited_once_with(alarm.installation)
+    alarm._client.refresh_alarm_status.assert_awaited_once_with(
+        alarm.installation, poll_timeout=ANY
+    )
     assert _sent(alarm) == ["ARM1"]
     assert alarm.coordinator.confirmed_is_provisional is False
 
@@ -11063,7 +11081,7 @@ async def test_a_command_starting_while_refresh_waits_keeps_its_state():
     alarm = make_alarm()
     _arm_timed_out(alarm)
 
-    async def _answer(_inst):
+    async def _answer(_inst, **_kwargs):
         alarm.coordinator.operation.begin("arm", [object()], "armed_home")
         return _status("D")
 
@@ -11547,7 +11565,7 @@ async def test_force_arm_from_the_phone_that_gives_up_waiting_is_notified(
         "created_at": datetime.now(),
     }
     alarm.coordinator.record_confirmed_proto_code("D")
-    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
+    alarm._config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
     _record_transitions(alarm)
     alarm.coordinator.operation.begin("disarm", [object()])  # never ends
     started = []
@@ -11574,3 +11592,62 @@ async def test_force_arm_from_the_phone_that_gives_up_waiting_is_notified(
         "arm_failed",
         {"error": "The alarm is busy with another command. Try again in a moment"},
     )
+
+
+async def test_rejected_command_is_saved_on_the_panels_own_entry():
+    """Entries on one account share a hub, attached to whichever entry signed
+    in first. A command the panel rejects is saved on the entry that owns the
+    panel, which is the one its setup reads back (#643)."""
+    alarm = make_alarm(config=_night_peri_config())
+    alarm._state = AlarmControlPanelState.ARMING
+    alarm._last_state = AlarmControlPanelState.DISARMED
+    own_entry = MagicMock(data={"username": "u", "country": "IT"})
+    alarm.coordinator.config_entry = own_entry
+    alarm._client.config_entry = MagicMock(data={"username": "u", "country": "IT"})
+    alarm.hass.config_entries = MagicMock()
+    alarm.client.arm_alarm = AsyncMock(
+        side_effect=VerisureOwaError("API error", http_status=400)
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+    updated = {
+        call.args[0]
+        for call in alarm.hass.config_entries.async_update_entry.call_args_list
+    }
+    assert updated == {own_entry}
+
+
+def test_partial_disarm_finds_the_sub_panels_of_the_panels_own_entry():
+    """The sub-panels a partial disarm updates are looked up under the entry
+    that owns the panel, not the entry the shared hub is attached to (#643)."""
+    panel = make_alarm()
+    interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
+    setup_alarm_entry_data(panel, sub_panels=[interior])
+    panel.coordinator.config_entry = MagicMock(entry_id="entry-id-1")
+    panel._client.config_entry = MagicMock(entry_id="entry-id-2")
+
+    assert panel._affected_axis_subpanels(["interior"]) == [interior]
+
+
+async def test_panel_commands_wait_as_long_as_the_entrys_own_timeout():
+    """The hub's client is shared by every entry on the account and carries
+    the first entry's operation timeout, so each command passes this entry's
+    own (#643)."""
+    alarm = make_alarm()
+    alarm._config["operation_poll_timeout"] = 7
+    alarm.client.arm_alarm = AsyncMock(return_value=_status("T"))
+    alarm.client.disarm_alarm = AsyncMock(return_value=_status("D"))
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+    await alarm.async_alarm_disarm()
+    await alarm.async_manual_refresh()
+
+    for mock in (
+        alarm.client.arm_alarm,
+        alarm.client.disarm_alarm,
+        alarm._client.refresh_alarm_status,
+    ):
+        assert mock.await_args.kwargs["poll_timeout"] == 7.0

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
@@ -22,6 +23,8 @@ from .const import (
     CONF_CODE_IS_NUMERIC,
     CONF_LOCK_AUTOMATIONS,
     CONF_LOCK_CODE_REQUIRED,
+    CONF_OPERATION_POLL_TIMEOUT,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
 )
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity, lock_device_info
@@ -140,6 +143,7 @@ class VerisureLock(  # type: ignore[override]
         coordinator: LockCoordinator,
         installation: Installation,
         client: VerisureHub,
+        config: Mapping[str, Any],
         device_id: str = SMARTLOCK_DEVICE_ID,
         initial_status: str = LOCK_STATUS_LOCKED,
         lock_config: SmartLock | None = None,
@@ -187,10 +191,14 @@ class VerisureLock(  # type: ignore[override]
         # code_format is what makes HA demand (and prompt for) a code, so it
         # doubles as the "gate is on" flag. Only the PIN's hash is stored, so
         # digit-ness comes from CONF_CODE_IS_NUMERIC (see pin_crypto).
-        self._code_hash: str | None = client.config.get(CONF_CODE_HASH)
-        if self._code_hash and client.config.get(CONF_LOCK_CODE_REQUIRED, False):
-            is_numeric = client.config.get(CONF_CODE_IS_NUMERIC, False)
+        # ``config`` is this entry's: the shared hub's is another entry's (#643).
+        self._code_hash: str | None = config.get(CONF_CODE_HASH)
+        if self._code_hash and config.get(CONF_LOCK_CODE_REQUIRED, False):
+            is_numeric = config.get(CONF_CODE_IS_NUMERIC, False)
             self._attr_code_format = r"^\d+$" if is_numeric else r".+"
+        self._poll_timeout = float(
+            config.get(CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT)
+        )
 
         self._operation_in_progress: bool = False
         # Verification-poll tuning (overridable in tests).
@@ -215,6 +223,11 @@ class VerisureLock(  # type: ignore[override]
     def device_id(self) -> str:
         """Return the device ID."""
         return self._device_id
+
+    @property
+    def poll_timeout(self) -> float:
+        """Return this entry's operation timeout, in seconds."""
+        return self._poll_timeout
 
     def update_lock_config(self, lock_config: SmartLock) -> None:
         """Update lock configuration after deferred retry."""
@@ -502,7 +515,10 @@ class VerisureLock(  # type: ignore[override]
         try:
             try:
                 await self._client.change_lock_mode(
-                    self._installation, lock_state, self._device_id
+                    self._installation,
+                    lock_state,
+                    self._device_id,
+                    poll_timeout=self._poll_timeout,
                 )
             except VerisureOwaError as err:
                 self._state = self._last_state

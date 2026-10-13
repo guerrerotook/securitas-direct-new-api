@@ -1146,6 +1146,7 @@ async def test_a_second_entry_for_an_installation_sets_up_no_alarm_panels(
                     coordinator=lock_coordinator,
                     installation=data["devices"][0].installation,
                     client=data["hub"],
+                    config=data["config"],
                 )
                 lock.hass = hass
                 await lock.async_added_to_hass()
@@ -1162,5 +1163,151 @@ async def test_a_second_entry_for_an_installation_sets_up_no_alarm_panels(
                     remove()
         finally:
             for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+# ── Two installations on one login ────────────────────────────────────────────
+
+
+def _two_installations(server: MockGraphQLServer) -> None:
+    """Serve one login that can see installations 111 and 222, both disarmed."""
+    queue_standard_setup(server, numinst="111")
+    server.clear_queue("mkInstallationList")
+    server.set_default_response("mkLoginToken", graphql_login())
+    server.set_default_response("RefreshLogin", refresh_response())
+    server.set_default_response(
+        "xSDeviceList", {"data": {"xSDeviceList": {"res": "OK", "devices": []}}}
+    )
+    server.set_default_response(
+        "mkInstallationList",
+        graphql_installations(
+            installations=[
+                {**inst, "numinst": numinst, "alias": alias}
+                for numinst, alias in (("111", "Interno"), ("222", "Esterno"))
+                for inst in graphql_installations()["data"]["xSInstallations"][
+                    "installations"
+                ]
+            ]
+        ),
+    )
+
+
+def _add_installation_entry(
+    hass: HomeAssistant, installation: str, map_away: str
+) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"user@example.com_{installation}",
+        data={
+            **make_config_entry_data(
+                username="user@example.com",
+                delay_check_operation=0,
+                map_away=map_away,
+            ),
+            CONF_INSTALLATION: installation,
+        },
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_each_installation_arms_with_its_own_entrys_mappings(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+):
+    """Two installations on one login share a single sign-in, but each entry
+    keeps its own button mappings: Away on the second installation sends what
+    that entry maps Away to, not what the first entry to sign in maps it to
+    (#643)."""
+    _two_installations(mock_server)
+    assert await async_setup_component(hass, DOMAIN, {})
+    first = _add_installation_entry(hass, "111", "total")
+    second = _add_installation_entry(hass, "222", "partial_night")
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [first, second])
+            data = hass.data[DOMAIN]
+            assert data[first.entry_id]["hub"] is data[second.entry_id]["hub"]
+            panel = data[second.entry_id]["combined_alarm_panels"]["222"]
+
+            mock_server.set_default_response("xSArmPanel", graphql_arm())
+            mock_server.set_default_response("ArmStatus", graphql_arm_status(proto="Q"))
+            mock_server.set_default_response("xSDisarmPanel", graphql_disarm())
+            mock_server.set_default_response(
+                "DisarmStatus", graphql_disarm_status(proto="D")
+            )
+            await hass.services.async_call(
+                "alarm_control_panel",
+                "alarm_arm_away",
+                {"entity_id": panel.entity_id},
+                blocking=True,
+            )
+
+            sent = [
+                body["variables"]["request"]
+                for _, _, body in mock_server.get_calls("xSArmPanel")
+            ]
+            assert sent == ["ARMNIGHT1"]
+        finally:
+            for entry in (first, second):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+async def test_a_reloaded_entry_arms_with_its_new_mappings_while_another_holds_the_login(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+):
+    """The sign-in outlives a reload while another entry on the account still
+    uses it, so a changed mapping takes effect on the reload rather than at
+    the next restart (#643)."""
+    _two_installations(mock_server)
+    assert await async_setup_component(hass, DOMAIN, {})
+    first = _add_installation_entry(hass, "111", "total")
+    second = _add_installation_entry(hass, "222", "total")
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [first, second])
+            hass.config_entries.async_update_entry(
+                first, data={**first.data, "map_away": "partial_night"}
+            )
+            assert await hass.config_entries.async_reload(first.entry_id)
+            await hass.async_block_till_done()
+            data = hass.data[DOMAIN]
+            assert data[first.entry_id]["hub"] is data[second.entry_id]["hub"]
+            panel = data[first.entry_id]["combined_alarm_panels"]["111"]
+
+            mock_server.set_default_response("xSArmPanel", graphql_arm())
+            mock_server.set_default_response("ArmStatus", graphql_arm_status(proto="Q"))
+            mock_server.set_default_response("xSDisarmPanel", graphql_disarm())
+            mock_server.set_default_response(
+                "DisarmStatus", graphql_disarm_status(proto="D")
+            )
+            await hass.services.async_call(
+                "alarm_control_panel",
+                "alarm_arm_away",
+                {"entity_id": panel.entity_id},
+                blocking=True,
+            )
+
+            sent = [
+                body["variables"]["request"]
+                for _, _, body in mock_server.get_calls("xSArmPanel")
+            ]
+            assert sent == ["ARMNIGHT1"]
+        finally:
+            for entry in (first, second):
                 await hass.config_entries.async_unload(entry.entry_id)
             await hass.async_block_till_done()

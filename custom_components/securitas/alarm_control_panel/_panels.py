@@ -189,8 +189,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         """
         if self.hass is None:
             return []
-        config_entry = getattr(self._client, "config_entry", None)
-        entry_id = getattr(config_entry, "entry_id", None)
+        entry_id = getattr(self.coordinator.config_entry, "entry_id", None)
         if entry_id is None:
             return []
         domain_data = self.hass.data.get(DOMAIN, {})
