@@ -130,10 +130,10 @@ def make_lock(
             and the optimistic fallback is used).
         code: Raw alarm PIN, or ``None`` for no PIN. Stored hashed
             (``CONF_CODE_HASH``/``CONF_CODE_IS_NUMERIC``) to match what
-            ``_build_config_dict`` actually puts on ``client.config`` — the
+            ``_build_config_dict`` actually puts in the entry's config — the
             raw PIN is never persisted.
         code_required: ``CONF_LOCK_CODE_REQUIRED`` toggle.
-        config: Full ``client.config`` override, bypassing ``code``/
+        config: Full entry config override, bypassing ``code``/
             ``code_required``. Use to drive the entity from a config dict
             built by production code.
         registry_hass: Real ``hass`` to expose as ``client.hass`` so
@@ -144,14 +144,17 @@ def make_lock(
     """
     installation = make_installation()
     code_hash, code_is_numeric = encode_pin(code)
-    client = MagicMock()
-    client.hass = registry_hass
-    client.config = config or {
+    config = config or {
         "scan_interval": 120,
         CONF_CODE_HASH: code_hash,
         CONF_CODE_IS_NUMERIC: code_is_numeric,
         CONF_LOCK_CODE_REQUIRED: code_required,
     }
+    client = MagicMock()
+    client.hass = registry_hass
+    # The hub is shared by every entry on the account; its config belongs to
+    # another entry, so the lock must not read it.
+    client.config = {"scan_interval": 120}
     client.session = AsyncMock()
     client.change_lock_mode = AsyncMock()
     if poll_status is not None:
@@ -173,6 +176,7 @@ def make_lock(
         coordinator=coordinator,
         installation=installation,
         client=client,
+        config=config,
         device_id=device_id,
         initial_status=initial_status,
         lock_config=lock_config,
@@ -1343,7 +1347,7 @@ class TestVerisureLockPinCode:
     def test_code_gate_reads_the_keys_build_config_dict_writes(self):
         """The gate must engage on a config built by production code.
 
-        ``make_lock`` hand-rolls ``client.config``, so a rename of the PIN
+        ``make_lock`` hand-rolls the entry config, so a rename of the PIN
         config keys can silently disable the gate in production while every
         other test in this class stays green. Drive the entity from a real
         ``_build_config_dict`` result so the two can't drift apart.

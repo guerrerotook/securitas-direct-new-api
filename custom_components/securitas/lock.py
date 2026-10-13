@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
@@ -140,6 +141,7 @@ class VerisureLock(  # type: ignore[override]
         coordinator: LockCoordinator,
         installation: Installation,
         client: VerisureHub,
+        config: Mapping[str, Any],
         device_id: str = SMARTLOCK_DEVICE_ID,
         initial_status: str = LOCK_STATUS_LOCKED,
         lock_config: SmartLock | None = None,
@@ -187,9 +189,10 @@ class VerisureLock(  # type: ignore[override]
         # code_format is what makes HA demand (and prompt for) a code, so it
         # doubles as the "gate is on" flag. Only the PIN's hash is stored, so
         # digit-ness comes from CONF_CODE_IS_NUMERIC (see pin_crypto).
-        self._code_hash: str | None = client.config.get(CONF_CODE_HASH)
-        if self._code_hash and client.config.get(CONF_LOCK_CODE_REQUIRED, False):
-            is_numeric = client.config.get(CONF_CODE_IS_NUMERIC, False)
+        # ``config`` is this entry's: the shared hub's is another entry's (#643).
+        self._code_hash: str | None = config.get(CONF_CODE_HASH)
+        if self._code_hash and config.get(CONF_LOCK_CODE_REQUIRED, False):
+            is_numeric = config.get(CONF_CODE_IS_NUMERIC, False)
             self._attr_code_format = r"^\d+$" if is_numeric else r".+"
 
         self._operation_in_progress: bool = False

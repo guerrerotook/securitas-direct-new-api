@@ -355,7 +355,9 @@ class VerisureHub:
             self._camera_capturing.discard(capture_key)
 
             # Push thumbnail into the camera coordinator so entities update
-            self._update_camera_coordinator_thumbnail(device.zone_id, thumbnail)
+            self._update_camera_coordinator_thumbnail(
+                installation.number, device.zone_id, thumbnail
+            )
 
             if image_bytes is None:
                 async_dispatcher_send(
@@ -439,7 +441,9 @@ class VerisureHub:
             return
 
         # Push full image into the camera coordinator so entities update
-        self._update_camera_coordinator_full_image(camera_device.zone_id, full_bytes)
+        self._update_camera_coordinator_full_image(
+            installation.number, camera_device.zone_id, full_bytes
+        )
 
     def _validate_and_store_image(
         self,
@@ -468,23 +472,27 @@ class VerisureHub:
             self.camera_timestamps[key] = thumbnail.timestamp
         return image_bytes
 
-    def _get_camera_coordinator(self) -> Any | None:
-        """Return the CameraCoordinator for this entry, if available."""
-        entry_id = self.config_entry.entry_id if self.config_entry else None
-        if entry_id is None:
-            return None
-        entry_data = self.hass.data.get(DOMAIN, {}).get(entry_id)
-        if entry_data is None:
-            return None
-        return entry_data.get("camera_coordinator")
+    def _get_camera_coordinator(self, installation_number: str) -> Any | None:
+        """Return the installation's CameraCoordinator, if available.
+
+        Searched across entries: the hub is shared by every entry on the
+        account, and ``config_entry`` is only the one that signed in first.
+        """
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            if not isinstance(entry_data, dict):
+                continue
+            coord = entry_data.get("camera_coordinator")
+            if coord is not None and coord.installation.number == installation_number:
+                return coord
+        return None
 
     def _update_camera_coordinator_thumbnail(
-        self, zone_id: str, thumbnail: ThumbnailResponse
+        self, installation_number: str, zone_id: str, thumbnail: ThumbnailResponse
     ) -> None:
         """Push a new thumbnail into the CameraCoordinator's data."""
         if thumbnail is None:
             return
-        camera_coord = self._get_camera_coordinator()
+        camera_coord = self._get_camera_coordinator(installation_number)
         if camera_coord is None or camera_coord.data is None:
             return
         from .coordinators import CameraData
@@ -497,10 +505,10 @@ class VerisureHub:
         camera_coord.async_set_updated_data(new_data)
 
     def _update_camera_coordinator_full_image(
-        self, zone_id: str, full_bytes: bytes
+        self, installation_number: str, zone_id: str, full_bytes: bytes
     ) -> None:
         """Push a new full-resolution image into the CameraCoordinator's data."""
-        camera_coord = self._get_camera_coordinator()
+        camera_coord = self._get_camera_coordinator(installation_number)
         if camera_coord is None or camera_coord.data is None:
             return
         from .coordinators import CameraData

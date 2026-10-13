@@ -611,6 +611,7 @@ class TestCaptureImage:
 
         # Set up a mock camera coordinator in entry_data
         mock_coord = MagicMock()
+        mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
         mock_coord.async_set_updated_data = MagicMock()
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
@@ -623,6 +624,39 @@ class TestCaptureImage:
         mock_coord.async_set_updated_data.assert_called_once()
         new_data = mock_coord.async_set_updated_data.call_args[0][0]
         assert device.zone_id in new_data.thumbnails
+
+    async def test_capture_updates_the_camera_of_the_captured_installation(self):
+        """Entries on one account share a hub, attached to whichever entry
+        signed in first. A capture updates the camera coordinator of the
+        installation it was taken on, not that entry's (#643)."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation(number="222")
+        device = make_camera_device()
+        _setup_capture(hub)
+        hub.config_entry = MagicMock(entry_id="first_entry")
+
+        def camera_coordinator(number):
+            coord = MagicMock()
+            coord.installation = make_installation(number=number)
+            coord.data = CameraData(thumbnails={}, full_images={})
+            return coord
+
+        first = camera_coordinator("111")
+        second = camera_coordinator("222")
+        hub.hass.data = {
+            DOMAIN: {
+                "first_entry": {"camera_coordinator": first},
+                "second_entry": {"camera_coordinator": second},
+            }
+        }
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        first.async_set_updated_data.assert_not_called()
+        second.async_set_updated_data.assert_called_once()
 
     async def test_capturing_flag_cleared_before_coordinator_update(self):
         """is_capturing must be False when async_set_updated_data fires.
@@ -652,6 +686,7 @@ class TestCaptureImage:
             )
 
         mock_coord = MagicMock()
+        mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
         mock_coord.async_set_updated_data = MagicMock(side_effect=_record)
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
@@ -835,6 +870,7 @@ class TestFullImageCapture:
         hub.config_entry = mock_entry
 
         mock_coord = MagicMock()
+        mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
         mock_coord.async_set_updated_data = MagicMock()
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}

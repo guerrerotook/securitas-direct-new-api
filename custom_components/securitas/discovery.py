@@ -168,8 +168,8 @@ def _schedule_lock_config_retry(
     lock_entity.async_on_remove(unsub)
     # The entity callback handles normal platform removal; the entry callback
     # also covers a retry scheduled while setup is only partially complete.
-    if hub.config_entry is not None:
-        hub.config_entry.async_on_unload(unsub)
+    if (entry := lock_entity.coordinator.config_entry) is not None:
+        entry.async_on_unload(unsub)
 
 
 async def _discover_locks(
@@ -233,6 +233,7 @@ async def _discover_locks(
                 coordinator=lock_coordinator,
                 installation=installation,
                 client=hub,
+                config=entry_data["config"],
                 device_id=device_id,
                 initial_status=mode.lock_status,
                 lock_config=lock_config,

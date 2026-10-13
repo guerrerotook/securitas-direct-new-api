@@ -3194,13 +3194,16 @@ class TestLockConfigRetry:
     """Tests for lock-config retry lifecycle ownership."""
 
     def test_cancel_callback_is_owned_by_entity_and_entry(self, hass):
-        """Either entity removal or entry unload can cancel a pending retry."""
+        """Either entity removal or unloading the lock's own entry can cancel a
+        pending retry. The shared hub is attached to whichever entry on the
+        account signed in first, which may be another one (#643)."""
         from custom_components.securitas import _schedule_lock_config_retry
 
         hub = make_securitas_hub_mock()
         hub.config_entry = MagicMock()
         lock_entity = MagicMock()
         lock_entity.device_id = "1"
+        own_entry = lock_entity.coordinator.config_entry
         cancel = MagicMock()
 
         with patch("homeassistant.helpers.event.async_call_later", return_value=cancel):
@@ -3212,7 +3215,8 @@ class TestLockConfigRetry:
             )
 
         lock_entity.async_on_remove.assert_called_once_with(cancel)
-        hub.config_entry.async_on_unload.assert_called_once_with(cancel)
+        own_entry.async_on_unload.assert_called_once_with(cancel)
+        hub.config_entry.async_on_unload.assert_not_called()
 
 
 # ===========================================================================

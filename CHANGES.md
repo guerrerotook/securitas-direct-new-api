@@ -4,6 +4,10 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.10.0
 
+### Fixed
+
+- **With two or more installations on one Verisure account, changed options were ignored** ([#643](https://github.com/guerrerotook/securitas-direct-new-api/issues/643)): the alarm panels and locks of every installation used the options of the installation that signed in first, as they were when Home Assistant started — its button mappings, PIN, notification settings and timeouts. So **Away** mapped to **Total + Perimeter** could still arm the interior only, even after reloading. Each installation now uses its own options, and a change applies when you save it. A photo taken on a camera of such an installation also shows at once instead of at the next refresh. Thanks to [@cenacolocortinovis](https://github.com/cenacolocortinovis) for the report and the debug log.
+
 ## v5.9.1
 
 ### Fixed
