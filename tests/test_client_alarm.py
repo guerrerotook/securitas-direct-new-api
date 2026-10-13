@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -898,3 +899,41 @@ class TestAlarmRequestContracts:
         content = transport.execute.call_args[0][0]
         assert content["operationName"] == "Status"
         assert content["variables"] == {"numinst": "123456"}
+
+
+@pytest.mark.parametrize(
+    ("submit", "wait", "call"),
+    [
+        (
+            arm_submit_response,
+            lambda: arm_status_response(res="WAIT"),
+            lambda c, inst, t: c.arm(inst, "ARM1", poll_timeout=t),
+        ),
+        (
+            disarm_submit_response,
+            lambda: disarm_status_response(res="WAIT"),
+            lambda c, inst, t: c.disarm(inst, "DARM1", poll_timeout=t),
+        ),
+        (
+            check_alarm_submit_response,
+            lambda: check_alarm_status_response(res="WAIT"),
+            lambda c, inst, t: c.check_alarm(inst, poll_timeout=t),
+        ),
+    ],
+    ids=["arm", "disarm", "check_alarm"],
+)
+async def test_a_callers_poll_timeout_overrides_the_clients(
+    client, transport, submit, wait, call
+):
+    """Entries on one account share a client, whose ``poll_timeout`` is the
+    first entry's. A caller's own timeout wins (#643)."""
+    responses = iter([submit()])
+
+    async def _execute(*_args, **_kwargs):
+        return next(responses, None) or wait()
+
+    transport.execute.side_effect = _execute
+    client.poll_timeout = 60.0
+
+    with pytest.raises(OperationTimeoutError):
+        await asyncio.wait_for(call(client, _make_installation(), 0.05), timeout=5)

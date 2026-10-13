@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -679,3 +680,21 @@ class TestLockRequestContracts:
         assert poll["variables"]["referenceId"] == "ref-lock-1"
         assert poll["variables"]["deviceId"] == "01"
         assert "counter" in poll["variables"]
+
+
+async def test_a_callers_poll_timeout_overrides_the_clients(client, transport):
+    """Entries on one account share a client, whose ``poll_timeout`` is the
+    first entry's. A caller's own timeout wins (#643)."""
+    responses = iter([change_lock_submit_response("ref-lock-009")])
+
+    async def _execute(*_args, **_kwargs):
+        return next(responses, None) or change_lock_status_response(res="WAIT")
+
+    transport.execute.side_effect = _execute
+    client.poll_timeout = 60.0
+
+    with pytest.raises(OperationTimeoutError):
+        await asyncio.wait_for(
+            client.change_lock_mode(_make_installation(), lock=True, poll_timeout=0.05),
+            timeout=5,
+        )

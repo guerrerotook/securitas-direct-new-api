@@ -416,14 +416,21 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """True while this panel takes part in the installation's running operation."""
         return self in self._operation.panels
 
-    def _operation_wait_limit(self) -> float:
-        """Seconds to wait for a running operation before treating it as stuck."""
-        poll_timeout = float(
+    @property
+    def _poll_timeout(self) -> float:
+        """Seconds to wait for the panel to answer one command or check.
+
+        Passed with each call: the shared client's own is another entry's.
+        """
+        return float(
             self._config.get(
                 CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
             )
         )
-        return _MAX_POLLS_PER_OPERATION * poll_timeout
+
+    def _operation_wait_limit(self) -> float:
+        """Seconds to wait for a running operation before treating it as stuck."""
+        return _MAX_POLLS_PER_OPERATION * self._poll_timeout
 
     def _repeats_running(self, kind: OperationKind, mode: str | None = None) -> bool:
         """True when the running operation is ``kind`` (for ``mode``, an arm's
@@ -955,11 +962,18 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         try:
             if command.startswith("D"):
                 result = await self.client.disarm_alarm(
-                    self.installation, command, on_start=_mark_sent
+                    self.installation,
+                    command,
+                    on_start=_mark_sent,
+                    poll_timeout=self._poll_timeout,
                 )
             else:
                 result = await self.client.arm_alarm(
-                    self.installation, command, on_start=_mark_sent, **force_params
+                    self.installation,
+                    command,
+                    on_start=_mark_sent,
+                    poll_timeout=self._poll_timeout,
+                    **force_params,
                 )
         except asyncio.CancelledError:
             # Once sent, the panel may have accepted the command before its
@@ -1062,7 +1076,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         entity service and the deprecated VerisureRefreshButton.
         """
         try:
-            alarm_status = await self._client.refresh_alarm_status(self._installation)
+            alarm_status = await self._client.refresh_alarm_status(
+                self._installation, poll_timeout=self._poll_timeout
+            )
             self._client.client.protom_response = alarm_status.protom_response
             _LOGGER.info(
                 "Status of the Alarm via API: %s installation id: %s",
@@ -1313,7 +1329,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Ask the panel for its state, when the last command was accepted but
         never confirmed, so an arm plans from what is really armed."""
         try:
-            status = await self._client.refresh_alarm_status(self._installation)
+            status = await self._client.refresh_alarm_status(
+                self._installation, poll_timeout=self._poll_timeout
+            )
         except OperationTimeoutError as err:
             # Not this arm's own timeout: the arm was never sent.
             raise VerisureOwaError(

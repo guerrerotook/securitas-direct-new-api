@@ -203,6 +203,8 @@ class _LockMixin(_ClientBase):
         installation: Installation,
         lock: bool,
         device_id: str = SMARTLOCK_DEVICE_ID,
+        *,
+        poll_timeout: float | None = None,
     ) -> SmartLockModeStatus:
         """Send lock/unlock command and poll until the backend responds.
 
@@ -210,6 +212,8 @@ class _LockMixin(_ClientBase):
             installation: The installation containing the lock.
             lock: True to lock, False to unlock.
             device_id: Lock device ID (defaults to SMARTLOCK_DEVICE_ID).
+            poll_timeout: Seconds to wait for the result; defaults to the
+                client's ``poll_timeout``.
 
         Returns:
             SmartLockModeStatus with the final operation result.
@@ -244,6 +248,7 @@ class _LockMixin(_ClientBase):
             status_query=CHANGE_LOCK_MODE_STATUS_QUERY,
             status_data_field="xSChangeSmartlockModeStatus",
             status_vars_builder=status_vars,
+            poll_timeout=poll_timeout,
         )
 
         # ── Process result ──

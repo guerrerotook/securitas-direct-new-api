@@ -439,6 +439,53 @@ class TestArmDisarmOnStart:
         getattr(hub.client, verb).assert_not_awaited()
 
 
+class TestPollTimeoutPassThrough:
+    """The hub is shared by every entry on an account, so each command carries
+    the calling entry's own operation timeout to the client (#643)."""
+
+    async def test_arm_alarm(self):
+        hub = make_hub()
+        hub.client.arm = AsyncMock()
+        installation = make_installation()
+
+        await hub.arm_alarm(installation, "ARM1", poll_timeout=7.0)
+
+        hub.client.arm.assert_awaited_once_with(
+            installation, "ARM1", force_id=None, suid=None, poll_timeout=7.0
+        )
+
+    async def test_disarm_alarm(self):
+        hub = make_hub()
+        hub.client.disarm = AsyncMock()
+        installation = make_installation()
+
+        await hub.disarm_alarm(installation, "DARM1", poll_timeout=7.0)
+
+        hub.client.disarm.assert_awaited_once_with(
+            installation, "DARM1", poll_timeout=7.0
+        )
+
+    async def test_refresh_alarm_status(self):
+        hub = make_hub()
+        hub.client.check_alarm = AsyncMock()
+        installation = make_installation()
+
+        await hub.refresh_alarm_status(installation, poll_timeout=7.0)
+
+        hub.client.check_alarm.assert_awaited_once_with(installation, poll_timeout=7.0)
+
+    async def test_change_lock_mode(self):
+        hub = make_hub()
+        hub.client.change_lock_mode = AsyncMock()
+        installation = make_installation()
+
+        await hub.change_lock_mode(installation, True, "device-1", poll_timeout=7.0)
+
+        hub.client.change_lock_mode.assert_awaited_once_with(
+            installation, True, "device-1", poll_timeout=7.0
+        )
+
+
 # ── change_lock_mode tests ──────────────────────────────────────────────────
 
 
@@ -459,7 +506,7 @@ class TestChangeLockMode:
         await hub.change_lock_mode(installation, True, "device-1")
 
         hub.client.change_lock_mode.assert_awaited_once_with(
-            installation, True, "device-1"
+            installation, True, "device-1", poll_timeout=None
         )
 
     async def test_error_propagates(self):

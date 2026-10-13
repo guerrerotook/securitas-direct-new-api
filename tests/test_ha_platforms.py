@@ -16,6 +16,8 @@ from custom_components.securitas.const import (
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
     CONF_LOCK_CODE_REQUIRED,
+    CONF_OPERATION_POLL_TIMEOUT,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
 )
 from custom_components.securitas.coordinators import (
     ActivityData,
@@ -1131,7 +1133,7 @@ class TestVerisureLockActions:
         lock = make_lock(poll_status="2")
         observed_states = []
 
-        async def capture_state(installation, lock_mode, device_id=None):
+        async def capture_state(installation, lock_mode, device_id=None, **_kwargs):
             """Capture state at the moment the API call is made."""
             observed_states.append(lock._state)
             return SmartLockModeStatus()
@@ -1150,7 +1152,7 @@ class TestVerisureLockActions:
         lock = make_lock(poll_status="1")
         observed_states = []
 
-        async def capture_state(installation, lock_mode, device_id=None):
+        async def capture_state(installation, lock_mode, device_id=None, **_kwargs):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
@@ -1189,15 +1191,28 @@ class TestVerisureLockActions:
         await lock.async_open()
 
         lock._client.change_lock_mode.assert_awaited_once_with(
-            lock.installation, False, "01"
+            lock.installation, False, "01", poll_timeout=DEFAULT_OPERATION_POLL_TIMEOUT
         )
+
+    async def test_lock_waits_as_long_as_its_entrys_own_timeout(self):
+        """The hub's client carries the first entry's operation timeout, so
+        the lock passes its own entry's (#643)."""
+        lock = make_lock(
+            poll_status="2",
+            config={"scan_interval": 120, CONF_OPERATION_POLL_TIMEOUT: 7},
+        )
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_lock()
+
+        assert lock._client.change_lock_mode.await_args.kwargs["poll_timeout"] == 7.0
 
     async def test_async_open_intermediate_state_is_opening(self):
         """Verify _force_state is called with '3' (opening) before the API call."""
         lock = make_lock(poll_status="1")
         observed_states = []
 
-        async def capture_state(installation, lock_mode, device_id=None):
+        async def capture_state(installation, lock_mode, device_id=None, **_kwargs):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
@@ -1272,7 +1287,7 @@ class TestVerisureLockActions:
         lock = make_lock(poll_status="2")
         observed = []
 
-        async def capture_flag(installation, lock_mode, device_id=None):
+        async def capture_flag(installation, lock_mode, device_id=None, **_kwargs):
             observed.append(lock._operation_in_progress)
 
         lock._client.change_lock_mode = AsyncMock(side_effect=capture_flag)
@@ -2686,7 +2701,7 @@ class TestVerisureLockUnlockDisarm:
             await asyncio.wait_for(unlock_started.wait(), timeout=1.0)
             return True
 
-        async def fake_change(_installation, _lock_state, _device_id=None):
+        async def fake_change(_installation, _lock_state, _device_id=None, **_kwargs):
             unlock_started.set()
             await asyncio.wait_for(disarm_started.wait(), timeout=1.0)
             return MagicMock()

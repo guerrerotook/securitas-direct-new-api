@@ -143,6 +143,7 @@ class _AlarmMixin(_ClientBase):
         *,
         force_id: str | None = None,
         suid: str | None = None,
+        poll_timeout: float | None = None,
     ) -> OperationStatus:
         """Arm the alarm panel.
 
@@ -153,6 +154,8 @@ class _AlarmMixin(_ClientBase):
             command: Arm command string (e.g. "ARM1", "ARMDAY1").
             force_id: Optional forceArmingRemoteId to override exceptions.
             suid: Optional SUID for exception handling.
+            poll_timeout: Seconds to wait for the result; defaults to the
+                client's ``poll_timeout``.
 
         Returns:
             OperationStatus with the final arm result.
@@ -198,6 +201,7 @@ class _AlarmMixin(_ClientBase):
             status_query=ARM_STATUS_QUERY,
             status_data_field="xSArmStatus",
             status_vars_builder=status_vars,
+            poll_timeout=poll_timeout,
         )
 
         # ── Process result ──
@@ -232,7 +236,7 @@ class _AlarmMixin(_ClientBase):
                 # without polling in that case (nothing to look up), so we
                 # surface the arming exception immediately with an empty list.
                 exceptions = await self._get_exceptions(
-                    installation, error_ref, error_suid
+                    installation, error_ref, error_suid, poll_timeout=poll_timeout
                 )
                 # Force-arming targets the bypass via referenceId/suid; without
                 # either, forcing is impossible (an empty force id degrades to a
@@ -260,6 +264,8 @@ class _AlarmMixin(_ClientBase):
         self,
         installation: Installation,
         command: str,
+        *,
+        poll_timeout: float | None = None,
     ) -> OperationStatus:
         """Disarm the alarm panel.
 
@@ -268,6 +274,8 @@ class _AlarmMixin(_ClientBase):
         Args:
             installation: The installation to disarm.
             command: Disarm command string (e.g. "DARM1", "DARM1DARMPERI").
+            poll_timeout: Seconds to wait for the result; defaults to the
+                client's ``poll_timeout``.
 
         Returns:
             OperationStatus with the final disarm result.
@@ -305,6 +313,7 @@ class _AlarmMixin(_ClientBase):
             status_query=DISARM_STATUS_QUERY,
             status_data_field="xSDisarmStatus",
             status_vars_builder=status_vars,
+            poll_timeout=poll_timeout,
         )
 
         # ── Process result ──
@@ -321,10 +330,13 @@ class _AlarmMixin(_ClientBase):
             self.protom_response = raw["protomResponse"]
         return OperationStatus.model_validate(raw)
 
-    async def check_alarm(self, installation: Installation) -> OperationStatus:
+    async def check_alarm(
+        self, installation: Installation, *, poll_timeout: float | None = None
+    ) -> OperationStatus:
         """Check the current alarm status by querying the panel.
 
         Submits a CHECK_ALARM query, then polls until the panel responds.
+        ``poll_timeout`` overrides the client's for this check.
 
         Returns:
             OperationStatus with the current alarm state.
@@ -355,6 +367,7 @@ class _AlarmMixin(_ClientBase):
             status_query=CHECK_ALARM_STATUS_QUERY,
             status_data_field="xSCheckAlarmStatus",
             status_vars_builder=status_vars,
+            poll_timeout=poll_timeout,
         )
 
         if raw.get("protomResponse"):
@@ -382,6 +395,8 @@ class _AlarmMixin(_ClientBase):
         installation: Installation,
         reference_id: str,
         suid: str,
+        *,
+        poll_timeout: float | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch arming exception details (e.g. open windows/doors).
 
@@ -416,5 +431,5 @@ class _AlarmMixin(_ClientBase):
             data = self._extract_response_data(response, "xSGetExceptions")
             return data
 
-        raw = await self._poll_operation(_check)
+        raw = await self._poll_operation(_check, timeout=poll_timeout)
         return raw.get("exceptions") or []

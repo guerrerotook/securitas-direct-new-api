@@ -1105,6 +1105,7 @@ class TestAsyncAlarmDisarm:
             alarm.installation,
             STATE_TO_COMMAND[VerisureOwaState.DISARMED],
             on_start=ANY,
+            poll_timeout=ANY,
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -1160,7 +1161,7 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_disarm_with_peri_configured_but_not_armed_uses_darm1(self):
@@ -1187,7 +1188,7 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
 
@@ -1246,7 +1247,7 @@ class TestSetArmState:
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
         alarm.client.arm_alarm.assert_called_once()
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
@@ -4212,7 +4213,7 @@ class TestCompoundArmCommands:
         await alarm.async_alarm_arm_night()
 
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY
+            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY, poll_timeout=ANY
         )
         assert len(alarm._resolver.unsupported) == 0
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
@@ -4281,6 +4282,7 @@ class TestCompoundArmCommands:
             "force_arming_remote_id": "ref-123",
             "suid": "suid-456",
             "on_start": ANY,
+            "poll_timeout": ANY,
         }
         assert len(calls) == 2
         assert calls[0][1] == expected_params
@@ -4616,7 +4618,7 @@ class TestCompoundArmCommands:
 
         # Should only try ARMNIGHT1PERI1 once — NOT fall back to multi-step
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY
+            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY, poll_timeout=ANY
         )
         assert "ARMNIGHT1PERI1" not in alarm._resolver.unsupported
 
@@ -4752,7 +4754,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -4860,7 +4862,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_no_peri_config_uses_darm1(self):
@@ -4874,7 +4876,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unsupported_combined_skips_to_darm1(self):
@@ -4898,7 +4900,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_both_disarm_attempts_fail(self):
@@ -4940,7 +4942,7 @@ class TestDynamicDisarm:
 
         # Should only try DARM1DARMPERI once — NOT fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         # Error placeholder carries clean API message, no full args dump
         mock_notify.assert_called_once()
@@ -5027,7 +5029,7 @@ class TestExecuteTransition:
             AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         )
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_disarm_compound_fallback_to_darm1(self):
@@ -5088,7 +5090,7 @@ class TestExecuteTransition:
             )
         # Only tried first command, didn't fall back
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
 
@@ -5105,7 +5107,7 @@ class TestExecuteTransition:
             )
         # Only tried first command, didn't fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
         # Not marked as unsupported — error was transient
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
@@ -5137,10 +5139,10 @@ class TestExecuteTransition:
             AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF)
         )
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1", on_start=ANY
+            alarm.installation, "ARMNIGHT1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_arm_total_peri_multi_step(self):
@@ -5252,7 +5254,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unknown_letter_sends_compound_disarm_with_peri(self):
@@ -5265,7 +5267,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI", on_start=ANY
+            alarm.installation, "DARM1DARMPERI", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_none_proto_code_sends_disarm(self):
@@ -5279,7 +5281,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unknown_state_never_arms(self):
@@ -5331,7 +5333,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
             await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1", on_start=ANY
+            alarm.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
         mock_notify.assert_not_called()
         assert alarm._state == AlarmControlPanelState.DISARMED
@@ -6360,7 +6362,7 @@ class TestSubPanelDisarmFromUnknownState:
         await panel._execute_transition(target)
 
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARM1", on_start=ANY
+            panel.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_perimeter_subpanel_disarms_only_perimeter(self):
@@ -6376,7 +6378,7 @@ class TestSubPanelDisarmFromUnknownState:
         await panel._execute_transition(target)
 
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARMPERI", on_start=ANY
+            panel.installation, "DARMPERI", on_start=ANY, poll_timeout=ANY
         )
 
 
@@ -7938,7 +7940,7 @@ class TestExecutePartialDisarm:
 
         assert ok is True
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARM1", on_start=ANY
+            panel.installation, "DARM1", on_start=ANY, poll_timeout=ANY
         )
 
     async def test_unknown_state_disarm_never_arms(self):
@@ -9102,7 +9104,9 @@ class TestAsyncManualRefresh:
 
         await alarm.async_manual_refresh()
 
-        alarm._client.refresh_alarm_status.assert_awaited_once_with(alarm._installation)
+        alarm._client.refresh_alarm_status.assert_awaited_once_with(
+            alarm._installation, poll_timeout=ANY
+        )
 
     async def test_updates_protom_response_on_success(self):
         from custom_components.securitas.verisure_owa_api.models import OperationStatus
@@ -10926,7 +10930,9 @@ async def test_arm_again_after_an_unconfirmed_arm_asks_the_panel_then_arms():
 
     await alarm.set_arm_state("armed_away")
 
-    alarm._client.refresh_alarm_status.assert_awaited_once_with(alarm.installation)
+    alarm._client.refresh_alarm_status.assert_awaited_once_with(
+        alarm.installation, poll_timeout=ANY
+    )
     assert _sent(alarm) == ["ARM1"]
     assert alarm.coordinator.confirmed_is_provisional is False
 
@@ -11078,7 +11084,7 @@ async def test_a_command_starting_while_refresh_waits_keeps_its_state():
     alarm = make_alarm()
     _arm_timed_out(alarm)
 
-    async def _answer(_inst):
+    async def _answer(_inst, **_kwargs):
         alarm.coordinator.operation.begin("arm", [object()], "armed_home")
         return _status("D")
 
@@ -11626,3 +11632,25 @@ def test_partial_disarm_finds_the_sub_panels_of_the_panels_own_entry():
     panel._client.config_entry = MagicMock(entry_id="entry-id-2")
 
     assert panel._affected_axis_subpanels(["interior"]) == [interior]
+
+
+async def test_panel_commands_wait_as_long_as_the_entrys_own_timeout():
+    """The hub's client is shared by every entry on the account and carries
+    the first entry's operation timeout, so each command passes this entry's
+    own (#643)."""
+    alarm = make_alarm()
+    alarm._config["operation_poll_timeout"] = 7
+    alarm.client.arm_alarm = AsyncMock(return_value=_status("T"))
+    alarm.client.disarm_alarm = AsyncMock(return_value=_status("D"))
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+    await alarm.async_alarm_disarm()
+    await alarm.async_manual_refresh()
+
+    for mock in (
+        alarm.client.arm_alarm,
+        alarm.client.disarm_alarm,
+        alarm._client.refresh_alarm_status,
+    ):
+        assert mock.await_args.kwargs["poll_timeout"] == 7.0

@@ -23,6 +23,8 @@ from .const import (
     CONF_CODE_IS_NUMERIC,
     CONF_LOCK_AUTOMATIONS,
     CONF_LOCK_CODE_REQUIRED,
+    CONF_OPERATION_POLL_TIMEOUT,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
 )
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity, lock_device_info
@@ -194,6 +196,9 @@ class VerisureLock(  # type: ignore[override]
         if self._code_hash and config.get(CONF_LOCK_CODE_REQUIRED, False):
             is_numeric = config.get(CONF_CODE_IS_NUMERIC, False)
             self._attr_code_format = r"^\d+$" if is_numeric else r".+"
+        self._poll_timeout = float(
+            config.get(CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT)
+        )
 
         self._operation_in_progress: bool = False
         # Verification-poll tuning (overridable in tests).
@@ -505,7 +510,10 @@ class VerisureLock(  # type: ignore[override]
         try:
             try:
                 await self._client.change_lock_mode(
-                    self._installation, lock_state, self._device_id
+                    self._installation,
+                    lock_state,
+                    self._device_id,
+                    poll_timeout=self._poll_timeout,
                 )
             except VerisureOwaError as err:
                 self._state = self._last_state

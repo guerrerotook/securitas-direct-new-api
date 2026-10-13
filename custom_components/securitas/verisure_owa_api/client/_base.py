@@ -924,12 +924,14 @@ class _ClientBase:
         status_query: str,
         status_data_field: str,
         status_vars_builder: Callable[[str, int], dict[str, Any]],
+        poll_timeout: float | None = None,
     ) -> dict[str, Any]:
         """Submit a mutation, extract its referenceId, then poll status until done.
 
         Common scaffold for arm/disarm/check_alarm/change_lock_mode. Returns
         the raw status dict from the final poll response — callers handle
         operation-specific error semantics and result-model validation.
+        ``poll_timeout`` overrides the client's for this operation.
         """
         submit_content = {
             "operationName": submit_op,
@@ -960,4 +962,4 @@ class _ClientBase:
             )
             return self._extract_response_data(response, status_data_field)
 
-        return await self._poll_operation(_check)
+        return await self._poll_operation(_check, timeout=poll_timeout)

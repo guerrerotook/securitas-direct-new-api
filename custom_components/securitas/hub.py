@@ -625,12 +625,14 @@ class VerisureHub:
         command: str,
         *,
         on_start: Callable[[], None] | None = None,
+        poll_timeout: float | None = None,
         **force_params: str,
     ) -> Any:
         """Arm the alarm via the client (polling handled internally).
 
         ``on_start`` runs once the command leaves the queue: a caller
-        cancelled before then sent nothing.
+        cancelled before then sent nothing. ``poll_timeout`` is the calling
+        entry's: the client's own is the entry that signed in first.
         """
         force_id = force_params.get("force_arming_remote_id")
         suid = force_params.get("suid")
@@ -639,7 +641,11 @@ class VerisureHub:
             if on_start is not None:
                 on_start()
             return await self.client.arm(
-                installation, command, force_id=force_id, suid=suid
+                installation,
+                command,
+                force_id=force_id,
+                suid=suid,
+                poll_timeout=poll_timeout,
             )
 
         return await self._api_queue.submit(
@@ -647,13 +653,15 @@ class VerisureHub:
             priority=ApiQueue.FOREGROUND,
         )
 
-    async def refresh_alarm_status(self, installation: Installation) -> OperationStatus:
+    async def refresh_alarm_status(
+        self, installation: Installation, *, poll_timeout: float | None = None
+    ) -> OperationStatus:
         """Full alarm status refresh via CheckAlarm + poll (through queue).
 
         Used by the refresh button for an authoritative protom round-trip.
         """
         return await self._api_queue.submit(
-            self.client.check_alarm,
+            partial(self.client.check_alarm, poll_timeout=poll_timeout),
             installation,
             priority=ApiQueue.FOREGROUND,
         )
@@ -664,6 +672,7 @@ class VerisureHub:
         command: str,
         *,
         on_start: Callable[[], None] | None = None,
+        poll_timeout: float | None = None,
     ) -> Any:
         """Disarm the alarm via the client (polling handled internally).
 
@@ -674,7 +683,9 @@ class VerisureHub:
         async def _disarm() -> OperationStatus:
             if on_start is not None:
                 on_start()
-            return await self.client.disarm(installation, command)
+            return await self.client.disarm(
+                installation, command, poll_timeout=poll_timeout
+            )
 
         return await self._api_queue.submit(
             _disarm,
@@ -682,14 +693,19 @@ class VerisureHub:
         )
 
     async def change_lock_mode(
-        self, installation: Installation, lock_state: bool, device_id: str
+        self,
+        installation: Installation,
+        lock_state: bool,
+        device_id: str,
+        *,
+        poll_timeout: float | None = None,
     ) -> None:
         """Send lock/unlock command and wait for completion.
 
         The client handles all polling internally.
         """
         await self._api_queue.submit(
-            self.client.change_lock_mode,
+            partial(self.client.change_lock_mode, poll_timeout=poll_timeout),
             installation,
             lock_state,
             device_id,
