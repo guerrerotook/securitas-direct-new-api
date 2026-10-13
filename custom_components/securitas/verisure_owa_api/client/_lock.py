@@ -72,6 +72,8 @@ class _LockMixin(_ClientBase):
         self,
         installation: Installation,
         device_id: str = SMARTLOCK_DEVICE_ID,
+        *,
+        poll_timeout: float | None = None,
     ) -> SmartLock:
         """Fetch lock configuration, auto-detecting Smartlock vs Danalock API.
 
@@ -82,6 +84,8 @@ class _LockMixin(_ClientBase):
         Args:
             installation: The installation to query.
             device_id: Lock device ID (defaults to SMARTLOCK_DEVICE_ID).
+            poll_timeout: Seconds to wait for the result; defaults to the
+                client's ``poll_timeout``.
 
         Returns:
             SmartLock with lock configuration details, or empty SmartLock().
@@ -140,7 +144,9 @@ class _LockMixin(_ClientBase):
 
         # ── Danalock fallback (two-phase polling) ──
         try:
-            return await self._get_danalock_config(installation, device_id)
+            return await self._get_danalock_config(
+                installation, device_id, poll_timeout=poll_timeout
+            )
         except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.debug(
                 "Danalock config fetch also failed for %s device %s",
@@ -155,8 +161,16 @@ class _LockMixin(_ClientBase):
         self,
         installation: Installation,
         device_id: str = SMARTLOCK_DEVICE_ID,
+        *,
+        poll_timeout: float | None = None,
     ) -> SmartLock:
         """Fetch Danalock config via submit + poll.
+
+        Args:
+            installation: The installation to query.
+            device_id: Lock device ID (defaults to SMARTLOCK_DEVICE_ID).
+            poll_timeout: Seconds to wait for the result; defaults to the
+                client's ``poll_timeout``.
 
         Returns:
             SmartLock with lock configuration, or SmartLock() on failure.
@@ -185,6 +199,7 @@ class _LockMixin(_ClientBase):
             status_query=DANALOCK_CONFIG_STATUS_QUERY,
             status_data_field="xSGetDanalockConfigStatus",
             status_vars_builder=status_vars,
+            poll_timeout=poll_timeout,
         )
 
         if raw.get("res") != "OK":
@@ -203,6 +218,8 @@ class _LockMixin(_ClientBase):
         installation: Installation,
         lock: bool,
         device_id: str = SMARTLOCK_DEVICE_ID,
+        *,
+        poll_timeout: float | None = None,
     ) -> SmartLockModeStatus:
         """Send lock/unlock command and poll until the backend responds.
 
@@ -210,6 +227,8 @@ class _LockMixin(_ClientBase):
             installation: The installation containing the lock.
             lock: True to lock, False to unlock.
             device_id: Lock device ID (defaults to SMARTLOCK_DEVICE_ID).
+            poll_timeout: Seconds to wait for the result; defaults to the
+                client's ``poll_timeout``.
 
         Returns:
             SmartLockModeStatus with the final operation result.
@@ -244,6 +263,7 @@ class _LockMixin(_ClientBase):
             status_query=CHANGE_LOCK_MODE_STATUS_QUERY,
             status_data_field="xSChangeSmartlockModeStatus",
             status_vars_builder=status_vars,
+            poll_timeout=poll_timeout,
         )
 
         # ── Process result ──

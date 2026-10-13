@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import (
+    CONF_OPERATION_POLL_TIMEOUT,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
+    DOMAIN,
+)
 from .coordinators import CameraCoordinator
 
 if TYPE_CHECKING:
@@ -141,6 +145,7 @@ def _schedule_lock_config_retry(
                 installation,
                 lock_entity.device_id,
                 priority=hub.api_queue.BACKGROUND,
+                poll_timeout=lock_entity.poll_timeout,
             )
         except Exception:  # pylint: disable=broad-exception-caught
             config = None
@@ -168,8 +173,8 @@ def _schedule_lock_config_retry(
     lock_entity.async_on_remove(unsub)
     # The entity callback handles normal platform removal; the entry callback
     # also covers a retry scheduled while setup is only partially complete.
-    if hub.config_entry is not None:
-        hub.config_entry.async_on_unload(unsub)
+    if (entry := lock_entity.coordinator.config_entry) is not None:
+        entry.async_on_unload(unsub)
 
 
 async def _discover_locks(
@@ -217,12 +222,19 @@ async def _discover_locks(
     lock_coordinator = entry_data.get("lock_coordinator")
     lock_add = entry_data.get("lock_add_entities")
     if lock_add and lock_coordinator is not None:
+        poll_timeout = float(
+            entry_data["config"].get(
+                CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+            )
+        )
         locks = []
         for mode in lock_modes:
             device_id = mode.device_id or SMARTLOCK_DEVICE_ID
             lock_config: SmartLock | None = None
             try:
-                lock_config = await hub.get_lock_config(installation, device_id)
+                lock_config = await hub.get_lock_config(
+                    installation, device_id, poll_timeout=poll_timeout
+                )
             except Exception:  # pylint: disable=broad-exception-caught
                 _LOGGER.debug(
                     "Could not fetch lock config for %s device %s",
@@ -233,6 +245,7 @@ async def _discover_locks(
                 coordinator=lock_coordinator,
                 installation=installation,
                 client=hub,
+                config=entry_data["config"],
                 device_id=device_id,
                 initial_status=mode.lock_status,
                 lock_config=lock_config,

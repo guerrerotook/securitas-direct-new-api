@@ -12,7 +12,7 @@ import datetime
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -158,7 +158,7 @@ _SUPPRESSED_PROMPT_FALLBACK_DELAY = 15.0
 
 
 def _read_unsupported_for_installation(
-    config: dict[str, Any], installation_number: str
+    config: Mapping[str, Any], installation_number: str
 ) -> list[str]:
     """Pull this installation's persisted unsupported-commands list.
 
@@ -229,10 +229,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         installation: Installation,
         client: VerisureHub,
         coordinator: AlarmCoordinator,
+        config: Mapping[str, Any],
     ) -> None:
-        """Initialize the Verisure alarm panel."""
+        """Initialize the Verisure alarm panel.
+
+        ``config`` is this entry's settings: the hub is shared by every entry
+        signed in to the same account, so its own ``config`` is that of
+        whichever entry signed in first (#643).
+        """
         CoordinatorEntity.__init__(self, coordinator)  # type: ignore[arg-type]
         VerisureEntity.__init__(self, installation, client)
+        self._config = config
         self._device: str = installation.address
         self._attr_name = installation.alias
         self._attr_unique_id: str | None = f"v4_securitas_direct.{installation.number}"
@@ -248,7 +255,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # once here. The card, the More Info dialog and the Tile feature only
         # offer their per-device tick box when True.
         self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
-            self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
+            self._config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
         )
         self._has_peri = coordinator.has_peri
         self._has_annex = coordinator.has_annex
@@ -257,9 +264,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._last_unmapped_logged: str | None = None
         self._resolver = CommandResolver(
             has_peri=self._has_peri,
-            unsupported=_read_unsupported_for_installation(
-                self._client.config, installation.number
-            ),
+            unsupported=_read_unsupported_for_installation(config, installation.number),
         )
 
         # Build outgoing map: HA state -> API command string
@@ -270,7 +275,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._securitas_state_map: dict[str, VerisureOwaState] = {}
 
         for ha_state, conf_key in HA_STATE_TO_CONF_KEY.items():
-            sec_state_str = self._client.config.get(conf_key)
+            sec_state_str = self._config.get(conf_key)
             if not sec_state_str:
                 continue
             sec_state = VerisureOwaState(sec_state_str)
@@ -287,21 +292,21 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 if proto_state == sec_state and code not in self._status_map:
                     self._status_map[code] = ha_state
                     break
-        scan_seconds = client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        scan_seconds = self._config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         # _update_interval is also used as the retention window for force-arm
         # context, so keep it at DEFAULT_SCAN_INTERVAL when polling is off.
         self._update_interval: timedelta = timedelta(
             seconds=scan_seconds if scan_seconds > 0 else DEFAULT_SCAN_INTERVAL
         )
-        self._code_hash: str | None = client.config.get(CONF_CODE_HASH, None)
+        self._code_hash: str | None = self._config.get(CONF_CODE_HASH, None)
         self._attr_code_format: CodeFormat | None = None
         if self._code_hash:
-            is_numeric = client.config.get(CONF_CODE_IS_NUMERIC, False)
+            is_numeric = self._config.get(CONF_CODE_IS_NUMERIC, False)
             self._attr_code_format = (
                 CodeFormat.NUMBER if is_numeric else CodeFormat.TEXT
             )
         self._attr_code_arm_required: bool = (
-            client.config.get(CONF_CODE_ARM_REQUIRED, False)
+            self._config.get(CONF_CODE_ARM_REQUIRED, False)
             if self._code_hash
             else False
         )
@@ -411,14 +416,21 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """True while this panel takes part in the installation's running operation."""
         return self in self._operation.panels
 
-    def _operation_wait_limit(self) -> float:
-        """Seconds to wait for a running operation before treating it as stuck."""
-        poll_timeout = float(
-            self._client.config.get(
+    @property
+    def _poll_timeout(self) -> float:
+        """Seconds to wait for the panel to answer one command or check.
+
+        Passed with each call: the shared client's own is another entry's.
+        """
+        return float(
+            self._config.get(
                 CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
             )
         )
-        return _MAX_POLLS_PER_OPERATION * poll_timeout
+
+    def _operation_wait_limit(self) -> float:
+        """Seconds to wait for a running operation before treating it as stuck."""
+        return _MAX_POLLS_PER_OPERATION * self._poll_timeout
 
     def _repeats_running(self, kind: OperationKind, mode: str | None = None) -> bool:
         """True when the running operation is ``kind`` (for ``mode``, an arm's
@@ -950,11 +962,18 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         try:
             if command.startswith("D"):
                 result = await self.client.disarm_alarm(
-                    self.installation, command, on_start=_mark_sent
+                    self.installation,
+                    command,
+                    on_start=_mark_sent,
+                    poll_timeout=self._poll_timeout,
                 )
             else:
                 result = await self.client.arm_alarm(
-                    self.installation, command, on_start=_mark_sent, **force_params
+                    self.installation,
+                    command,
+                    on_start=_mark_sent,
+                    poll_timeout=self._poll_timeout,
+                    **force_params,
                 )
         except asyncio.CancelledError:
             # Once sent, the panel may have accepted the command before its
@@ -994,7 +1013,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         sub-panels' don't). Update the registry explicitly so the
         frontend's now-unreachable button drops out of the card.
         """
-        entry = getattr(self._client, "config_entry", None)
+        entry = self.coordinator.config_entry
         if entry is None:
             return
         installation_num = self._installation.number
@@ -1057,7 +1076,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         entity service and the deprecated VerisureRefreshButton.
         """
         try:
-            alarm_status = await self._client.refresh_alarm_status(self._installation)
+            alarm_status = await self._client.refresh_alarm_status(
+                self._installation, poll_timeout=self._poll_timeout
+            )
             self._client.client.protom_response = alarm_status.protom_response
             _LOGGER.info(
                 "Status of the Alarm via API: %s installation id: %s",
@@ -1166,7 +1187,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _notify_operation_unconfirmed(self, translation_key: str) -> None:
         """Raise the accepted-but-unconfirmed persistent notification."""
-        timeout = self.client.config.get(
+        timeout = self._config.get(
             CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
         )
         _notify(
@@ -1308,7 +1329,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Ask the panel for its state, when the last command was accepted but
         never confirmed, so an arm plans from what is really armed."""
         try:
-            status = await self._client.refresh_alarm_status(self._installation)
+            status = await self._client.refresh_alarm_status(
+                self._installation, poll_timeout=self._poll_timeout
+            )
         except OperationTimeoutError as err:
             # Not this arm's own timeout: the arm was never sent.
             raise VerisureOwaError(
@@ -1708,7 +1731,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             },
         )
 
-        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        notify_group = self._config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             await self.hass.services.async_call(
                 domain="notify",
@@ -1805,7 +1828,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     @property
     def _notifications_enabled(self) -> bool:
         """Return True if the built-in force-arm notification handler is active."""
-        return self._client.config.get(CONF_FORCE_ARM_NOTIFICATIONS, True)
+        return self._config.get(CONF_FORCE_ARM_NOTIFICATIONS, True)
 
     def _register_arming_exception_handler(self) -> None:
         """Register event listeners for built-in arming exception notifications.
@@ -1978,7 +2001,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             },
         )
 
-        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        notify_group = self._config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             notification_data: dict[str, Any] = {
                 "tag": self._arming_exception_notification_id,
@@ -2021,7 +2044,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return
         if not self._notifications_enabled:
             return
-        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        notify_group = self._config.get(CONF_NOTIFY_GROUP)
         if not notify_group:
             return
 
@@ -2060,7 +2083,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
         )
         # Clear mobile notification if notify group is configured
-        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        notify_group = self._config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             self.hass.async_create_task(
                 self.hass.services.async_call(
