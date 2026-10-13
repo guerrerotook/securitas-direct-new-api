@@ -686,6 +686,11 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         # capture-driven requests on the same camera.
         self._full_image_fetcher = full_image_fetcher
 
+    @property
+    def installation(self) -> Installation:
+        """The installation whose cameras this coordinator polls."""
+        return self._installation
+
     async def _fetch_thumbnails(
         self, previous: CameraData | None
     ) -> dict[str, ThumbnailResponse]:

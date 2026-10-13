@@ -365,6 +365,7 @@ async def async_setup_entry(
             devices.installation,
             client=client,
             coordinator=coordinator,
+            config=entry_data["config"],
         )
         entry_data.setdefault("combined_alarm_panels", {})[
             devices.installation.number
@@ -386,6 +387,7 @@ async def async_setup_entry(
                 devices.installation,
                 client=client,
                 coordinator=coordinator,
+                config=entry_data["config"],
             )
             all_entities.append(peri_panel)
             axis_panels[peri_panel._AXIS] = peri_panel  # pylint: disable=protected-access
@@ -395,6 +397,7 @@ async def async_setup_entry(
                 devices.installation,
                 client=client,
                 coordinator=coordinator,
+                config=entry_data["config"],
             )
             all_entities.append(annex_panel)
             axis_panels[annex_panel._AXIS] = annex_panel  # pylint: disable=protected-access
@@ -404,6 +407,7 @@ async def async_setup_entry(
                 devices.installation,
                 client=client,
                 coordinator=coordinator,
+                config=entry_data["config"],
             )
             all_entities.append(interior_panel)
             axis_panels[interior_panel._AXIS] = interior_panel  # pylint: disable=protected-access

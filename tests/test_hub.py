@@ -439,6 +439,64 @@ class TestArmDisarmOnStart:
         getattr(hub.client, verb).assert_not_awaited()
 
 
+class TestPollTimeoutPassThrough:
+    """The hub is shared by every entry on an account, so each command carries
+    the calling entry's own operation timeout to the client (#643)."""
+
+    async def test_arm_alarm(self):
+        hub = make_hub()
+        hub.client.arm = AsyncMock()
+        installation = make_installation()
+
+        await hub.arm_alarm(installation, "ARM1", poll_timeout=7.0)
+
+        hub.client.arm.assert_awaited_once_with(
+            installation, "ARM1", force_id=None, suid=None, poll_timeout=7.0
+        )
+
+    async def test_disarm_alarm(self):
+        hub = make_hub()
+        hub.client.disarm = AsyncMock()
+        installation = make_installation()
+
+        await hub.disarm_alarm(installation, "DARM1", poll_timeout=7.0)
+
+        hub.client.disarm.assert_awaited_once_with(
+            installation, "DARM1", poll_timeout=7.0
+        )
+
+    async def test_refresh_alarm_status(self):
+        hub = make_hub()
+        hub.client.check_alarm = AsyncMock()
+        installation = make_installation()
+
+        await hub.refresh_alarm_status(installation, poll_timeout=7.0)
+
+        hub.client.check_alarm.assert_awaited_once_with(installation, poll_timeout=7.0)
+
+    async def test_change_lock_mode(self):
+        hub = make_hub()
+        hub.client.change_lock_mode = AsyncMock()
+        installation = make_installation()
+
+        await hub.change_lock_mode(installation, True, "device-1", poll_timeout=7.0)
+
+        hub.client.change_lock_mode.assert_awaited_once_with(
+            installation, True, "device-1", poll_timeout=7.0
+        )
+
+    async def test_get_lock_config(self):
+        hub = make_hub()
+        hub.client.get_lock_config = AsyncMock()
+        installation = make_installation()
+
+        await hub.get_lock_config(installation, "device-1", poll_timeout=7.0)
+
+        hub.client.get_lock_config.assert_awaited_once_with(
+            installation, "device-1", poll_timeout=7.0
+        )
+
+
 # ── change_lock_mode tests ──────────────────────────────────────────────────
 
 
@@ -459,7 +517,7 @@ class TestChangeLockMode:
         await hub.change_lock_mode(installation, True, "device-1")
 
         hub.client.change_lock_mode.assert_awaited_once_with(
-            installation, True, "device-1"
+            installation, True, "device-1", poll_timeout=None
         )
 
     async def test_error_propagates(self):
@@ -611,6 +669,7 @@ class TestCaptureImage:
 
         # Set up a mock camera coordinator in entry_data
         mock_coord = MagicMock()
+        mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
         mock_coord.async_set_updated_data = MagicMock()
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
@@ -623,6 +682,96 @@ class TestCaptureImage:
         mock_coord.async_set_updated_data.assert_called_once()
         new_data = mock_coord.async_set_updated_data.call_args[0][0]
         assert device.zone_id in new_data.thumbnails
+
+    async def test_capture_updates_the_camera_of_the_captured_installation(self):
+        """Entries on one account share a hub, attached to whichever entry
+        signed in first. A capture updates the camera coordinator of the
+        installation it was taken on, not that entry's (#643)."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation(number="222")
+        device = make_camera_device()
+        _setup_capture(hub)
+        hub.config_entry = MagicMock(entry_id="first_entry")
+
+        def camera_coordinator(number):
+            coord = MagicMock()
+            coord.installation = make_installation(number=number)
+            coord.data = CameraData(thumbnails={}, full_images={})
+            return coord
+
+        first = camera_coordinator("111")
+        second = camera_coordinator("222")
+        hub.hass.data = {
+            DOMAIN: {
+                "first_entry": {"camera_coordinator": first},
+                "second_entry": {"camera_coordinator": second},
+            }
+        }
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        first.async_set_updated_data.assert_not_called()
+        second.async_set_updated_data.assert_called_once()
+
+    async def test_capture_updates_every_camera_coordinator_of_the_installation(
+        self,
+    ):
+        """Two entries can hold one installation, each with a camera
+        coordinator, while only one of them owns the camera entities. Which
+        comes first in hass.data depends on reload order, so a capture
+        updates both, with the thumbnail and then the full image."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation(number="222")
+        device = make_camera_device()
+        full_jpeg = b"\xff\xd8\xff\xe0full"
+        hub.client.capture_image = AsyncMock(
+            return_value=make_thumbnail(
+                id_signal="sig2",
+                image="base64data",
+                timestamp="2026-03-11 10:01:00",
+                signal_type="16",
+            )
+        )
+        hub.client.get_full_image = AsyncMock(return_value=full_jpeg)
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        def camera_coordinator(number):
+            coord = MagicMock()
+            coord.installation = make_installation(number=number)
+            coord.data = CameraData(thumbnails={}, full_images={})
+            return coord
+
+        other = camera_coordinator("111")
+        duplicate = camera_coordinator("222")
+        owner = camera_coordinator("222")
+        hub.hass.data = {
+            DOMAIN: {
+                "other_entry": {"camera_coordinator": other},
+                "duplicate_entry": {"camera_coordinator": duplicate},
+                "owner_entry": {"camera_coordinator": owner},
+            }
+        }
+        tasks = []
+        hub.hass.async_create_task = lambda coro, **_: (
+            tasks.append(asyncio.create_task(coro)) or tasks[-1]
+        )
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+            for task in tasks:
+                await task
+
+        other.async_set_updated_data.assert_not_called()
+        for coord in (duplicate, owner):
+            updates = [c.args[0] for c in coord.async_set_updated_data.call_args_list]
+            assert len(updates) == 2
+            assert device.zone_id in updates[0].thumbnails
+            assert updates[1].full_images[device.zone_id] == full_jpeg
 
     async def test_capturing_flag_cleared_before_coordinator_update(self):
         """is_capturing must be False when async_set_updated_data fires.
@@ -652,6 +801,7 @@ class TestCaptureImage:
             )
 
         mock_coord = MagicMock()
+        mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
         mock_coord.async_set_updated_data = MagicMock(side_effect=_record)
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
@@ -835,6 +985,7 @@ class TestFullImageCapture:
         hub.config_entry = mock_entry
 
         mock_coord = MagicMock()
+        mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
         mock_coord.async_set_updated_data = MagicMock()
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}

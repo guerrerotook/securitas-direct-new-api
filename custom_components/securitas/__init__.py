@@ -1737,6 +1737,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "lock_coordinator": lock_coord,
             "activity_coordinator": activity_coord,
             "config_entry": entry,
+            "config": config,
         }
         # Signalled by _async_discover_devices once lock discovery has either
         # populated registered_locks or definitively failed. The options-flow

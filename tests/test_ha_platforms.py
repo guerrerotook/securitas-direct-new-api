@@ -16,6 +16,8 @@ from custom_components.securitas.const import (
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
     CONF_LOCK_CODE_REQUIRED,
+    CONF_OPERATION_POLL_TIMEOUT,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
 )
 from custom_components.securitas.coordinators import (
     ActivityData,
@@ -130,10 +132,10 @@ def make_lock(
             and the optimistic fallback is used).
         code: Raw alarm PIN, or ``None`` for no PIN. Stored hashed
             (``CONF_CODE_HASH``/``CONF_CODE_IS_NUMERIC``) to match what
-            ``_build_config_dict`` actually puts on ``client.config`` — the
+            ``_build_config_dict`` actually puts in the entry's config — the
             raw PIN is never persisted.
         code_required: ``CONF_LOCK_CODE_REQUIRED`` toggle.
-        config: Full ``client.config`` override, bypassing ``code``/
+        config: Full entry config override, bypassing ``code``/
             ``code_required``. Use to drive the entity from a config dict
             built by production code.
         registry_hass: Real ``hass`` to expose as ``client.hass`` so
@@ -144,14 +146,17 @@ def make_lock(
     """
     installation = make_installation()
     code_hash, code_is_numeric = encode_pin(code)
-    client = MagicMock()
-    client.hass = registry_hass
-    client.config = config or {
+    config = config or {
         "scan_interval": 120,
         CONF_CODE_HASH: code_hash,
         CONF_CODE_IS_NUMERIC: code_is_numeric,
         CONF_LOCK_CODE_REQUIRED: code_required,
     }
+    client = MagicMock()
+    client.hass = registry_hass
+    # The hub is shared by every entry on the account; its config belongs to
+    # another entry, so the lock must not read it.
+    client.config = {"scan_interval": 120}
     client.session = AsyncMock()
     client.change_lock_mode = AsyncMock()
     if poll_status is not None:
@@ -173,6 +178,7 @@ def make_lock(
         coordinator=coordinator,
         installation=installation,
         client=client,
+        config=config,
         device_id=device_id,
         initial_status=initial_status,
         lock_config=lock_config,
@@ -1127,7 +1133,7 @@ class TestVerisureLockActions:
         lock = make_lock(poll_status="2")
         observed_states = []
 
-        async def capture_state(installation, lock_mode, device_id=None):
+        async def capture_state(installation, lock_mode, device_id=None, **_kwargs):
             """Capture state at the moment the API call is made."""
             observed_states.append(lock._state)
             return SmartLockModeStatus()
@@ -1146,7 +1152,7 @@ class TestVerisureLockActions:
         lock = make_lock(poll_status="1")
         observed_states = []
 
-        async def capture_state(installation, lock_mode, device_id=None):
+        async def capture_state(installation, lock_mode, device_id=None, **_kwargs):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
@@ -1185,15 +1191,28 @@ class TestVerisureLockActions:
         await lock.async_open()
 
         lock._client.change_lock_mode.assert_awaited_once_with(
-            lock.installation, False, "01"
+            lock.installation, False, "01", poll_timeout=DEFAULT_OPERATION_POLL_TIMEOUT
         )
+
+    async def test_lock_waits_as_long_as_its_entrys_own_timeout(self):
+        """The hub's client carries the first entry's operation timeout, so
+        the lock passes its own entry's timeout (#643)."""
+        lock = make_lock(
+            poll_status="2",
+            config={"scan_interval": 120, CONF_OPERATION_POLL_TIMEOUT: 7},
+        )
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_lock()
+
+        assert lock._client.change_lock_mode.await_args.kwargs["poll_timeout"] == 7.0
 
     async def test_async_open_intermediate_state_is_opening(self):
         """Verify _force_state is called with '3' (opening) before the API call."""
         lock = make_lock(poll_status="1")
         observed_states = []
 
-        async def capture_state(installation, lock_mode, device_id=None):
+        async def capture_state(installation, lock_mode, device_id=None, **_kwargs):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
@@ -1268,7 +1287,7 @@ class TestVerisureLockActions:
         lock = make_lock(poll_status="2")
         observed = []
 
-        async def capture_flag(installation, lock_mode, device_id=None):
+        async def capture_flag(installation, lock_mode, device_id=None, **_kwargs):
             observed.append(lock._operation_in_progress)
 
         lock._client.change_lock_mode = AsyncMock(side_effect=capture_flag)
@@ -1343,7 +1362,7 @@ class TestVerisureLockPinCode:
     def test_code_gate_reads_the_keys_build_config_dict_writes(self):
         """The gate must engage on a config built by production code.
 
-        ``make_lock`` hand-rolls ``client.config``, so a rename of the PIN
+        ``make_lock`` hand-rolls the entry config, so a rename of the PIN
         config keys can silently disable the gate in production while every
         other test in this class stays green. Drive the entity from a real
         ``_build_config_dict`` result so the two can't drift apart.
@@ -2682,7 +2701,7 @@ class TestVerisureLockUnlockDisarm:
             await asyncio.wait_for(unlock_started.wait(), timeout=1.0)
             return True
 
-        async def fake_change(_installation, _lock_state, _device_id=None):
+        async def fake_change(_installation, _lock_state, _device_id=None, **_kwargs):
             unlock_started.set()
             await asyncio.wait_for(disarm_started.wait(), timeout=1.0)
             return MagicMock()
