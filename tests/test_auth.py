@@ -941,11 +941,41 @@ class TestRefusalsKeepRetrying:
         assert await _poll(client) is None  # t=15: persisting
         client.login.assert_awaited_once()
 
-        clock.advance(minutes=1)
+        # The mocked login does not end the period, as a failed one would not:
+        # the password login is paced like a refresh.
         calls = client.refresh_token.await_count
+        for _ in range(4):  # t=16..19
+            clock.advance(minutes=1)
+            assert "still refusing" in str(await _poll(client))
+        assert client.login.await_count == 1
+        clock.advance(minutes=1)  # t=20
         assert await _poll(client) is None
         assert client.refresh_token.await_count == calls
         assert client.login.await_count == 2
+
+    async def test_a_failing_password_login_is_paced(self, mock_transport, clock):
+        """A password login that fails while refusals persist (a 5xx during an
+        outage) is tried at most once every 5 minutes, like a refresh."""
+        client = _token_only_client(mock_transport, password="secret")
+        del client.login  # the real login, failing at the transport
+        logins: list[datetime] = []
+
+        async def execute(content, headers, **kwargs):
+            if content["operationName"] == "RefreshLogin":
+                raise refresh_token_rejected_error()
+            assert content["operationName"] == "mkLoginToken"
+            logins.append(clock.utc)
+            raise VerisureOwaError("server unavailable", http_status=500)
+
+        mock_transport.execute.side_effect = execute
+        start = clock.utc
+
+        for minute in range(26):
+            if minute:
+                clock.advance(minutes=1)
+            assert isinstance(await _poll(client), VerisureOwaError)
+
+        assert logins == [start + timedelta(minutes=m) for m in (15, 20, 25)]
 
     @REFUSALS
     async def test_adopting_a_token_retries_at_once_and_keeps_the_alert(

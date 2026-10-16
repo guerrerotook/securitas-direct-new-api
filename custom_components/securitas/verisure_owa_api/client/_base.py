@@ -536,11 +536,14 @@ class _ClientBase:
             # already minted a fresh token while we were waiting.
             if not self._token_needs_renewal():
                 return
+            if self.refresh_token_value:
+                # Paces the password fallback too: a password login failing
+                # during an outage must not be retried on every poll.
+                self._pace_refused_renewal()
+                self._last_renewal_attempt = datetime.now(UTC)
             if self.refresh_token_value and not (
                 self._refusals_persisting and self.password
             ):
-                self._pace_refused_renewal()
-                self._last_renewal_attempt = datetime.now(UTC)
                 _LOGGER.debug("[auth] Auth token expired, refreshing")
                 try:
                     # pylint: disable=no-member  # provided by _AuthMixin
