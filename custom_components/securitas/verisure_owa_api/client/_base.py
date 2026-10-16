@@ -14,7 +14,7 @@ import json
 import logging
 import secrets
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import jwt
@@ -182,6 +182,7 @@ class _ClientBase:
         self._refresh_crash_reported: bool = False
         # Refusal period: see REFRESH_REFUSAL_ALERT_AFTER. Only a successful
         # renewal (or adopting another token) ends it; other failures don't.
+        # Its times are UTC so a daylight-saving change can't move them.
         self._refresh_refused_since: datetime | None = None
         self._refusals_persisting: bool = False
         # Pacing is per client, not per coordinator: every coordinator and user
@@ -528,7 +529,7 @@ class _ClientBase:
                 self._refusals_persisting and self.password
             ):
                 self._pace_refused_renewal()
-                self._last_renewal_attempt = datetime.now()
+                self._last_renewal_attempt = datetime.now(UTC)
                 _LOGGER.debug("[auth] Auth token expired, refreshing")
                 try:
                     # pylint: disable=no-member  # provided by _AuthMixin
@@ -584,10 +585,10 @@ class _ClientBase:
         if not self._refusals_persisting or last is None:
             return
         next_try = last + REFRESH_REFUSAL_RETRY_EVERY
-        if datetime.now() < next_try:
+        if datetime.now(UTC) < next_try:
             raise VerisureOwaError(
                 "Verisure is still refusing the saved sign-in; next try after "
-                f"{next_try:%H:%M:%S}"
+                f"{next_try.astimezone():%H:%M:%S}"
             )
 
     def _note_refresh_refusal(self, signal: str) -> None:
@@ -596,7 +597,7 @@ class _ClientBase:
         Judged at the refusal itself, so a quiet spell with no renewal due
         never turns into an alert on its own.
         """
-        now = datetime.now()
+        now = datetime.now(UTC)
         since = self._refresh_refused_since
         if since is None:
             self._refresh_refused_since = now

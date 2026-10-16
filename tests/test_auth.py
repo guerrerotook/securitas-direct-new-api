@@ -1,7 +1,9 @@
 """Tests for VerisureOwaClient authentication flow."""
 
 import asyncio
-from datetime import datetime, timedelta
+import os
+import time
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -635,26 +637,44 @@ class TestStreakResetOnSuccess:
 
 
 class _Clock:
-    """The time the client's ``datetime.now()`` reports, moved by hand."""
+    """The time the client's ``datetime.now()`` reports, moved by hand.
+
+    Real time is kept in UTC; the local wall clock is Lisbon's, so moving
+    across 01:00 UTC on 2026-10-25 sets it back an hour as daylight saving
+    ends.
+    """
 
     def __init__(self) -> None:
-        self.now = datetime(2026, 10, 16, 15, 44)
+        self.utc = datetime(2026, 10, 16, 14, 44, tzinfo=UTC)
+
+    @property
+    def now(self) -> datetime:
+        """The local wall-clock time, naive like ``datetime.now()``."""
+        return self.utc.astimezone().replace(tzinfo=None)
 
     def advance(self, **kwargs: float) -> None:
-        self.now += timedelta(**kwargs)
+        self.utc += timedelta(**kwargs)
 
 
 @pytest.fixture
 def clock(monkeypatch):
+    saved_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/Lisbon"
+    time.tzset()
     fake = _Clock()
 
     class _FakeDatetime(datetime):
         @classmethod
         def now(cls, tz=None):
-            return fake.now
+            return fake.now if tz is None else fake.utc.astimezone(tz)
 
     monkeypatch.setattr(_base, "datetime", _FakeDatetime)
-    return fake
+    yield fake
+    if saved_tz is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = saved_tz
+    time.tzset()
 
 
 REFUSALS = pytest.mark.parametrize(
@@ -966,31 +986,112 @@ class TestRefusalsKeepRetrying:
 
         assert caplog.text.count("on_refresh_refusal_alert callback raised") == 2
 
+    async def test_clock_set_back_while_persisting_keeps_five_minute_pacing(
+        self, mock_transport, clock
+    ):
+        """Daylight saving ending must not stretch the 5-minute wait to 65."""
+        clock.utc = datetime(2026, 10, 25, 0, 41, tzinfo=UTC)
+        client = _token_only_client(mock_transport)
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
+        before = clock.now  # 01:56 local, the last attempt
+        attempted: list[int] = []
+        messages: list[str] = []
+
+        for minute in range(1, 11):
+            clock.advance(minutes=1)
+            calls = client.refresh_token.await_count
+            err = await _poll(client)
+            if client.refresh_token.await_count > calls:
+                attempted.append(minute)
+            else:
+                messages.append(str(err))
+
+        assert clock.now < before  # the wall clock really went back
+        assert attempted == [5, 10]
+        # The next try reads in local time, after the change: 01:01 WET.
+        assert all(m.endswith("next try after 01:01:00") for m in messages[:4])
+
+    async def test_clock_set_back_does_not_delay_the_alert(self, mock_transport, clock):
+        clock.utc = datetime(2026, 10, 25, 0, 50, tzinfo=UTC)  # 01:50 local
+        alerted_at: list[datetime] = []
+        client = _token_only_client(
+            mock_transport,
+            on_refresh_refusal_alert=lambda active: alerted_at.append(clock.utc),
+        )
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+
+        for _ in range(21):
+            await _poll(client)
+            clock.advance(minutes=1)
+
+        # 15 minutes after the first refusal, though local time read 01:05.
+        assert alerted_at == [datetime(2026, 10, 25, 1, 5, tzinfo=UTC)]
+
     async def test_concurrent_renewals_while_paced_share_one_attempt(
         self, mock_transport, clock
     ):
         client = _token_only_client(mock_transport)
         await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
-        calls = client.refresh_token.await_count
+        client.refresh_token = AsyncMock(
+            side_effect=_yielding(_fresh(refresh_token_rejected_error))
+        )
 
         clock.advance(minutes=1)
-        client.authentication_token_exp = datetime.min
-        results = await asyncio.gather(
-            client._check_authentication_token(),
-            client._check_authentication_token(),
-            return_exceptions=True,
-        )
+        results = await _race(client)
         assert all("still refusing" in str(r) for r in results)
-        assert client.refresh_token.await_count == calls
+        assert client.refresh_token.await_count == 0
 
         clock.advance(minutes=4)  # the window's end
-        results = await asyncio.gather(
-            client._check_authentication_token(),
-            client._check_authentication_token(),
-            return_exceptions=True,
-        )
+        results = await _race(client)
         assert all(isinstance(r, VerisureOwaError) for r in results)
-        assert client.refresh_token.await_count == calls + 1
+        assert client.refresh_token.await_count == 1
+
+    async def test_concurrent_callers_at_the_window_end_share_one_renewal(
+        self, mock_transport, clock
+    ):
+        """The caller queued behind the one allowed attempt waits for its
+        result: when it renews, both carry on with the new token rather than
+        the second being told Verisure is still refusing."""
+        client = _token_only_client(mock_transport)
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
+
+        async def _renew():
+            client.authentication_token_exp = clock.now + timedelta(minutes=15)
+            client.note_auth_success()
+            return True
+
+        client.refresh_token = AsyncMock(side_effect=_yielding(_renew))
+        clock.advance(minutes=5)  # the window's end
+
+        assert await _race(client) == [None, None]
+        assert client.refresh_token.await_count == 1
+        assert client.refresh_refusals_persisting is False
+
+
+def _yielding(effect):
+    """Wrap a refresh_token() side effect so it yields to the event loop
+    first, as a real network call does, letting a concurrent caller run."""
+
+    async def _effect():
+        await asyncio.sleep(0)
+        result = effect()
+        if asyncio.iscoroutine(result):
+            result = await result
+        return result
+
+    return _effect
+
+
+async def _race(client) -> list[BaseException | None]:
+    """Two renewals due at once on an expired token; what each one returned."""
+    client.authentication_token_exp = datetime.min
+    return await asyncio.gather(
+        client._check_authentication_token(),
+        client._check_authentication_token(),
+        return_exceptions=True,
+    )
 
 
 # ── Auth mutations opt out of the transport's blind 403 retry ──────────────
