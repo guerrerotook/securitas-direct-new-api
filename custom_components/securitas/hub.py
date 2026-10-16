@@ -251,14 +251,14 @@ class VerisureHub:
         ConfigEntryAuthFailed — sending an empty password to the API would just
         waste a round trip.
 
-        A transient failure (network, 5xx, 409, WAF block, a single
+        A transient failure (network, 5xx, 409, WAF block, an
         xSRefreshLogin server crash or err 4 rejection) does not take that path:
         it propagates so setup maps it to ConfigEntryNotReady and retries,
         instead of forcing a needless reauth on a token-only account. This
         mirrors the transient-vs-genuine split the client and coordinators
         already use via is_genuine_auth_failure(). Verisure refusing the token
         is retried this way however long it lasts; setup tracks how long (see
-        _login_or_raise in __init__).
+        _note_setup_refresh_refusal in __init__).
 
         For an account that still has a stored password, this deliberately means
         a transient refresh failure retries rather than immediately burning a

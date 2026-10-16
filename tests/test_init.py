@@ -2025,7 +2025,7 @@ class TestSharedSession:
         assert mock_hub.config_entry is entry
         assert written_to == [entry]
 
-    async def test_attaching_a_reused_hub_keeps_the_entry_token_over_a_dead_one(
+    async def test_attaching_a_reused_hub_keeps_the_entry_token_over_a_refused_one(
         self, hass, mock_hub
     ):
         mock_hub.refresh_refusals_persisting = True
@@ -4016,9 +4016,9 @@ class TestSetupRefreshRefusals:
 
 
 class TestCoTenantStoredTokenRecovery:
-    """Two installations share one hub whose client has condemned its token.
+    """Two installations share one hub whose token Verisure keeps refusing.
 
-    A reloaded entry whose own stored token differs from the condemned one
+    A reloaded entry whose own stored token differs from the refused one
     lands on the reuse branch while the co-tenant still holds the session, and
     tries its stored token on the shared client: adopt it and log in with it.
     """
@@ -4067,11 +4067,11 @@ class TestCoTenantStoredTokenRecovery:
         mock_hub.login.assert_awaited_once()
         assert _sign_in_issues(hass) == {}
 
-    async def test_reload_with_the_dead_token_itself_does_not_relogin(
+    async def test_reload_with_the_refused_token_itself_does_not_relogin(
         self, hass, mock_hub
     ):
-        """A co-tenant reloading with the very token found dead has nothing
-        new to offer: reuse as before, and let its own reauth prompt fire."""
+        """A co-tenant reloading with the very token being refused has nothing
+        new to offer: reuse as before; the client keeps retrying it."""
         data = make_config_entry_data()
         data[CONF_REFRESH_TOKEN] = "dead-token"
         entry = MockConfigEntry(domain=DOMAIN, data=data)

@@ -666,7 +666,7 @@ def _note_setup_refresh_refusal(hass: HomeAssistant, username: str) -> None:
     _LOGGER.warning(
         "Verisure has refused to renew the saved sign-in for %d minutes. The "
         "integration keeps trying every few minutes; if it doesn't recover, "
-        "sign in again from the integration's menu: Reconfigure.",
+        "sign in again with Reconfigure in the entry's menu.",
         int((now - period["since"]).total_seconds() // 60),
     )
 
@@ -677,6 +677,7 @@ def _clear_setup_refresh_refusals(hass: HomeAssistant, username: str) -> None:
     hass.data.get(DOMAIN, {}).get("refresh_refusals", {}).pop(username, None)
 
 
+@callback
 def _drop_unused_setup_refresh_refusals(
     hass: HomeAssistant, removing: ConfigEntry
 ) -> None:
@@ -1935,7 +1936,7 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
     reloaded entry set up again first. A plain reload keeps its session and
-    dead-token count; after reauth or Reconfigure the entry joins the session
+    its record of refusals; after reauth or Reconfigure the entry joins the session
     that dialog registered (and lets go of the old account's session if the
     account changed).
     """
@@ -2027,7 +2028,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     _async_update_duplicate_entry_issues(hass, removing=entry)
     _clear_sign_in_issues(hass, None, removing=entry)
-    _drop_unused_setup_refresh_refusals(hass, entry)
+    _drop_unused_setup_refresh_refusals(hass, removing=entry)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return

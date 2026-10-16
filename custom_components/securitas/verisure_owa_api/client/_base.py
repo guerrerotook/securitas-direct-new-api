@@ -620,8 +620,8 @@ class _ClientBase:
         _LOGGER.warning(
             "Verisure has refused to renew the saved sign-in for %d minutes "
             "(last: %s). The integration keeps trying every few minutes; if it "
-            "doesn't recover, sign in again from the integration's menu: "
-            "Reconfigure.",
+            "doesn't recover, sign in again with Reconfigure in the entry's "
+            "menu.",
             int((now - since).total_seconds() // 60),
             signal,
         )

@@ -2441,9 +2441,9 @@ async def test_closing_one_flow_keeps_the_session_another_flow_borrowed(hass):
 async def test_closing_a_flow_during_an_entrys_token_recovery_keeps_the_session(
     hass,
 ):
-    """An entry reusing the flow's session may sign in again first (a dead
-    refresh token); closing the flow meanwhile must not unregister the session
-    the entry is about to hold."""
+    """An entry reusing the flow's session may sign in again first (a refresh
+    token Verisure keeps refusing); closing the flow meanwhile must not
+    unregister the session the entry is about to hold."""
     hub = _hub_factory()
     hub.config = make_config_entry_data()
     flow = await _start_user_flow(hass, hub)
@@ -2978,9 +2978,10 @@ async def test_removing_the_token_owner_skips_a_co_tenant_moved_to_another_accou
     assert written_to == [cabin]
 
 
-async def test_a_dead_token_is_not_handed_to_the_co_tenant(hass):
-    """A condemned token is not written to the co-tenant: it would replace the
-    co-tenant's own token, which setup may still be able to use."""
+async def test_a_refused_token_is_not_handed_to_the_co_tenant(hass):
+    """A token Verisure keeps refusing is not written to the co-tenant: it
+    would replace the co-tenant's own token, which setup may still be able to
+    use."""
     hub = _two_installation_hub()
     home = await _load_home_entry(hass, hub)
     office = _add_office_entry(hass)
