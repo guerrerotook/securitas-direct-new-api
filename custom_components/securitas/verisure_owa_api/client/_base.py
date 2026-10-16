@@ -660,7 +660,9 @@ class _ClientBase:
 
         Hold it to replace the refresh token without racing a renewal. Not
         re-entrant: while holding it, sign in with refresh_token() or login(),
-        which never take it, not with anything that renews (_ensure_auth).
+        which never take it, never with anything that renews
+        (_check_authentication_token, which _ensure_auth, get_services and
+        _execute_graphql's 403 retry call).
         """
         return self._auth_lock
 
