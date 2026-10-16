@@ -185,6 +185,23 @@ class TestRenewalRefusedIssue:
         retired.client._notify_refusal_alert(False)
         assert list(_domain_issues(hass)) == [_RENEWAL_REFUSED_ID]
 
+    async def test_no_notice_for_an_account_the_entry_has_left(self, hass):
+        """After Reconfigure moves the hub's entry to another account, the old
+        account's refusals concern no entry: no notice is raised for it. One
+        already raised is still cleared."""
+        hub = self._hub(hass)
+        hub.client._notify_refusal_alert(True)
+        assert hub.config_entry is not None
+        hass.config_entries.async_update_entry(
+            hub.config_entry, data={"username": "other@example.com"}
+        )
+
+        hub.client._notify_refusal_alert(False)
+        assert _domain_issues(hass) == {}
+
+        hub.client._notify_refusal_alert(True)
+        assert _domain_issues(hass) == {}
+
 
 class TestRefreshTokenPersistence:
     """Tests that rotated refresh tokens get written to entry.data."""

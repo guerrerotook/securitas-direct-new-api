@@ -640,12 +640,18 @@ class VerisureHub:
         built by the config flow) must not re-raise an issue the sign-in
         cleared.
         """
-        if self.config_entry is None:
-            return
         if active:
-            raise_renewal_refused_issue(self.hass, self.client.username)
-        else:
+            self.raise_refusal_notice()
+        elif self.config_entry is not None:
             clear_renewal_refused_issue(self.hass, self.client.username)
+
+    def raise_refusal_notice(self) -> None:
+        """Raise the renewal-refused issue, unless no entry uses the account:
+        the hub is detached, or Reconfigure moved its entry to another one."""
+        entry = self.config_entry
+        if entry is None or entry.data.get(CONF_USERNAME) != self.client.username:
+            return
+        raise_renewal_refused_issue(self.hass, self.client.username)
 
     def persist_current_refresh_token(self) -> None:
         """Write the current in-memory refresh token to the config entry now.

@@ -51,6 +51,7 @@ from custom_components.securitas import (
     PLATFORMS,
     VerisureDevice,
     VerisureHub,
+    _attach_token_persistence,
     _build_config_dict,
     _cached_installations,
     _get_or_create_session,
@@ -4069,3 +4070,31 @@ class TestCoTenantStoredTokenRecovery:
 
         assert hub.get_refresh_token() == "own"
         hub.client.refresh_token.assert_awaited_once()
+
+    async def test_a_notice_due_while_detached_appears_on_reattach(self, hass, clock):
+        """Refusals that reach 15 minutes while the hub has no entry (only a
+        setup dialog holds the session) raise no notice then, and the client
+        will not ask again this refusal period: attaching an entry raises it."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "own"},
+        )
+        entry.add_to_hass(hass)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = None
+        hub.client.password = ""
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        clock.advance(minutes=15)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.client.refresh_refusals_persisting
+        assert _renewal_refused_issues(hass) == {}
+
+        _attach_token_persistence(hub, entry)
+
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+        assert entry.data[CONF_REFRESH_TOKEN] == "own"

@@ -878,10 +878,13 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
     The current token is written at once, since it may have rotated past the
     one ``entry`` stored, unless ``entry`` is signed in to another account. A
     token Verisure keeps refusing is not written: it would replace the entry's
-    own token, which setup may still be able to use.
+    own token, which setup may still be able to use. Its notice is raised
+    instead, since the client raises it only once and a detached hub drops it.
     """
     hub.config_entry = entry
-    if not hub.refresh_refusals_persisting:
+    if hub.refresh_refusals_persisting:
+        hub.raise_refusal_notice()
+    else:
         hub.persist_current_refresh_token()
 
 
