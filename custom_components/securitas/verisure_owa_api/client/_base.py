@@ -14,6 +14,7 @@ import json
 import logging
 import secrets
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -115,6 +116,16 @@ _AUTH_OPERATIONS = frozenset(
         "mkValidateDevice",
     }
 )
+
+
+@dataclass(frozen=True)
+class RefreshTokenSnapshot:
+    """The refresh token and refusal period an adoption replaced."""
+
+    token: str
+    refused_since: datetime | None
+    persisting: bool
+    last_renewal_attempt: datetime | None
 
 
 class _ClientBase:
@@ -635,16 +646,36 @@ class _ClientBase:
         """True once Verisure has refused renewals for REFRESH_REFUSAL_ALERT_AFTER."""
         return self._refusals_persisting
 
-    def adopt_refresh_token(self, value: str) -> None:
+    @property
+    def refresh_refusal_alert_raised(self) -> bool:
+        """True from the refusal alert until a renewal succeeds."""
+        return self._refusal_alert_raised
+
+    def adopt_refresh_token(self, value: str) -> RefreshTokenSnapshot:
         """Replace the refresh token with the stored one of an entry joining
         this shared session.
 
         Ends the refusal period so the next renewal tries it at once. The
-        token is not persisted here: that entry already stores it.
+        token is not persisted here: that entry already stores it. Returns
+        what it replaced, for restore_refresh_token should the token fail.
         """
+        snapshot = RefreshTokenSnapshot(
+            token=self.refresh_token_value,
+            refused_since=self._refresh_refused_since,
+            persisting=self._refusals_persisting,
+            last_renewal_attempt=self._last_renewal_attempt,
+        )
         self.refresh_token_value = value
         self._register_secret("refresh_token", value)
         self._reset_refusal_period()
+        return snapshot
+
+    def restore_refresh_token(self, snapshot: RefreshTokenSnapshot) -> None:
+        """Undo adopt_refresh_token after the adopted token failed."""
+        self.refresh_token_value = snapshot.token
+        self._refresh_refused_since = snapshot.refused_since
+        self._refusals_persisting = snapshot.persisting
+        self._last_renewal_attempt = snapshot.last_renewal_attempt
 
     def note_auth_success(self) -> None:
         """Reset the auth-recovery streak after a successful authentication."""

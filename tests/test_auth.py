@@ -958,6 +958,7 @@ class TestRefusalsKeepRetrying:
         clock.advance(minutes=1)
         client.adopt_refresh_token("co-tenant-token")
         assert client.refresh_refusals_persisting is False
+        assert client.refresh_refusal_alert_raised is True
         calls = client.refresh_token.await_count
         await _poll(client)
         assert client.refresh_token.await_count == calls + 1
@@ -970,6 +971,46 @@ class TestRefusalsKeepRetrying:
         client.refresh_token = AsyncMock(side_effect=_succeed(client))
         assert await _poll(client) is None
         assert alerts.call_args_list == [call(True), call(False)]
+        assert client.refresh_refusal_alert_raised is False
+
+    async def test_restoring_undoes_an_adoption(self, mock_transport, clock):
+        """An adopted token that fails is handed back: the client's own token
+        and its refusal period return as they were, so renewals stay paced."""
+        client = _token_only_client(mock_transport)
+        client.refresh_token_value = "own-token"
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
+
+        clock.advance(minutes=1)
+        snapshot = client.adopt_refresh_token("co-tenant-token")
+        assert client.refresh_token_value == "co-tenant-token"
+        client.restore_refresh_token(snapshot)
+
+        assert client.refresh_token_value == "own-token"
+        assert client.refresh_refusals_persisting is True
+        calls = client.refresh_token.await_count
+        err = await _poll(client)
+        assert "next try after" in str(err)
+        assert client.refresh_token.await_count == calls
+        clock.advance(minutes=4)
+        await _poll(client)
+        assert client.refresh_token.await_count == calls + 1
+
+    async def test_restoring_keeps_the_period_start(self, mock_transport, clock):
+        """A period not yet persisting keeps its start: the refusal 15 minutes
+        after the first still raises the alert."""
+        alerts = MagicMock()
+        client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        await _poll(client)
+
+        clock.advance(minutes=14)
+        client.restore_refresh_token(client.adopt_refresh_token("co-tenant-token"))
+        clock.advance(minutes=1)
+        await _poll(client)
+
+        alerts.assert_called_once_with(True)
 
     async def test_a_raising_callback_does_not_break_renewal(
         self, mock_transport, clock, caplog

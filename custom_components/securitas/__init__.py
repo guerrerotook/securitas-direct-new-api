@@ -677,6 +677,22 @@ def _clear_setup_refresh_refusals(hass: HomeAssistant, username: str) -> None:
     hass.data.get(DOMAIN, {}).get("refresh_refusals", {}).pop(username, None)
 
 
+def _drop_unused_setup_refresh_refusals(
+    hass: HomeAssistant, removing: ConfigEntry
+) -> None:
+    """Forget setup-time refusals of accounts no entry but ``removing`` uses."""
+    refusals = hass.data.get(DOMAIN, {}).get("refresh_refusals")
+    if not refusals:
+        return
+    in_use = {
+        entry.data.get(CONF_USERNAME)
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.entry_id != removing.entry_id
+    }
+    for username in set(refusals) - in_use:
+        del refusals[username]
+
+
 async def _login_or_raise(
     hass: HomeAssistant,
     client: VerisureHub,
@@ -990,8 +1006,14 @@ async def _get_or_create_session(
                 and stored_token
                 and stored_token != client.get_refresh_token()
             ):
-                client.adopt_refresh_token(stored_token)
-                await _login_or_raise(hass, client, username)
+                replaced = client.adopt_refresh_token(stored_token)
+                try:
+                    await _login_or_raise(hass, client, username)
+                except BaseException:
+                    # The running entries still depend on the shared token,
+                    # which may yet recover.
+                    client.restore_refresh_token(replaced)
+                    raise
                 signed_in = True
         else:
             client = await _login_ipv4_first(hass, config, entry, username)
@@ -1000,14 +1022,14 @@ async def _get_or_create_session(
             signed_in = True
 
     # Any session handed back ends the setup refusal period, even a reused one
-    # whose adopted token was never tried; refusals from here on are tracked
-    # by the client's renewals instead.
+    # nobody signed in to here; refusals from here on are tracked by the
+    # client's renewals instead.
     _clear_setup_refresh_refusals(hass, username)
-    if not client.refresh_refusals_persisting:
+    # A raised alert outlives an adoption; the client clears it on success.
+    if not (client.refresh_refusals_persisting or client.refresh_refusal_alert_raised):
         clear_renewal_refused_issue(hass, username)
-    # Only a sign-in made here shows the account can sign in now. A reused
-    # session may hold a token Verisure has just refused: adopting it made the
-    # session's token match this entry's, so this call does not try it again.
+    # Only a sign-in made here shows the account can sign in now; a reused
+    # session's token may be one Verisure has just refused.
     if signed_in:
         _clear_sign_in_issues(hass, username)
     return client
@@ -2005,6 +2027,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     _async_update_duplicate_entry_issues(hass, removing=entry)
     _clear_sign_in_issues(hass, None, removing=entry)
+    _drop_unused_setup_refresh_refusals(hass, entry)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return

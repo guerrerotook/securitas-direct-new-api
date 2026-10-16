@@ -2,6 +2,8 @@
 
 import contextlib
 import hashlib
+import os
+import time
 from collections import Counter, OrderedDict
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -82,6 +84,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     APIConnectionError,
     AuthenticationError,
+    SessionExpiredError,
     TwoFactorRequiredError,
     VerisureOwaError,
 )
@@ -2750,9 +2753,10 @@ class TestSignInIssue:
     async def test_reusing_a_shared_session_whose_token_was_refused_keeps_it(
         self, hass, error_type
     ):
-        """The shared session's token was found dead, and this entry's own
-        token, adopted to replace it, is refused too. The next setup reuses the
-        session without signing in, which proves nothing: the issue stays."""
+        """The shared session's token keeps being refused, and this entry's
+        own token, adopted to replace it, is rejected: the shared token is put
+        back. A co-tenant's setup then reuses the session without signing in,
+        which proves nothing: the issue stays."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "replacement"},
@@ -2779,8 +2783,9 @@ class TestSignInIssue:
         with pytest.raises(AuthenticationError):
             await _get_or_create_session(hass, dict(entry.data), entry)
         assert list(_sign_in_issues(hass)) == [_SIGN_IN_ISSUE_ID]
+        assert hub.get_refresh_token() == "condemned"
 
-        await _get_or_create_session(hass, dict(entry.data), entry)
+        await _get_or_create_session(hass, dict(other.data), other)
 
         assert hub.client.refresh_token.await_count == 1
         assert list(_sign_in_issues(hass)) == [_SIGN_IN_ISSUE_ID]
@@ -3612,7 +3617,12 @@ class TestServiceDescriptionTargets:
 
 
 class _Clock:
-    """The time ``datetime.now()`` reports in setup and the client, moved by hand."""
+    """The time ``datetime.now()`` reports in setup and the client, moved by hand.
+
+    Real time is kept in UTC; the local wall clock is Lisbon's, so moving
+    across 01:00 UTC on 2026-10-25 sets it back an hour as daylight saving
+    ends.
+    """
 
     def __init__(self) -> None:
         self.utc = datetime(2026, 10, 16, 14, 44, tzinfo=UTC)
@@ -3623,18 +3633,33 @@ class _Clock:
 
 @pytest.fixture
 def clock(monkeypatch):
+    saved_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/Lisbon"
+    time.tzset()
     fake = _Clock()
 
     class _FakeDatetime(datetime):
         @classmethod
         def now(cls, tz=None):
             if tz is None:
-                return fake.utc.replace(tzinfo=None)
+                return fake.utc.astimezone().replace(tzinfo=None)
             return fake.utc.astimezone(tz)
 
     monkeypatch.setattr(securitas_init, "datetime", _FakeDatetime)
     monkeypatch.setattr(client_base, "datetime", _FakeDatetime)
-    return fake
+    yield fake
+    if saved_tz is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = saved_tz
+    time.tzset()
+
+
+def _keep_another_account_loaded(hass, username="other@example.com") -> None:
+    hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[username] = {
+        "hub": MagicMock(),
+        "holders": {"other-account-entry-id"},
+    }
 
 
 _REFUSALS = pytest.mark.parametrize(
@@ -3796,10 +3821,15 @@ class TestSetupRefreshRefusals:
         self, hass, mock_hub, clock
     ):
         """A refusal, then setup succeeding on a co-tenant's session (the reuse
-        branch), must end the period: any session handed back resets it."""
+        branch), must end the period: any session handed back resets it.
+
+        Another account stays loaded so the unload does not tear down
+        hass.data[DOMAIN] wholesale, which would hide a missing reset.
+        """
         mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
+        _keep_another_account_loaded(hass)
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
 
@@ -3839,12 +3869,7 @@ class TestSetupRefreshRefusals:
         )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
-        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
-            "other@example.com"
-        ] = {
-            "hub": MagicMock(),
-            "holders": {"other-account-entry-id"},
-        }
+        _keep_another_account_loaded(hass)
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
@@ -3917,6 +3942,72 @@ class TestSetupRefreshRefusals:
 
         mock_hub.login.assert_not_awaited()
         assert (_renewal_refused_issues(hass) == {}) is cleared
+
+    async def test_a_handed_back_session_keeps_the_notice_while_its_alert_stands(
+        self, hass, mock_hub
+    ):
+        """Adopting a token ends the client's refusal period but not its
+        alert: until a renewal succeeds, Verisure may still be refusing, and
+        the client clears its own notice when one does."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_renewal_refused_issue(hass, "test@example.com")
+        mock_hub.refresh_refusals_persisting = False
+        mock_hub.refresh_refusal_alert_raised = True
+        mock_hub.config_entry = entry
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "test@example.com"
+        ] = {"hub": mock_hub, "holders": {"co-tenant-entry-id"}}
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+
+    async def test_clock_set_back_does_not_delay_the_notice(
+        self, hass, mock_hub, clock
+    ):
+        clock.utc = datetime(2026, 10, 25, 0, 50, tzinfo=UTC)  # 01:50 local
+        mock_hub.login = AsyncMock(side_effect=refresh_token_rejected_error())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+        clock.advance(minutes=15)  # 01:05 local, after the clocks went back
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+
+    @pytest.mark.parametrize(
+        ("second_entry", "kept"),
+        [(False, False), (True, True)],
+        ids=["last-entry-drops-it", "entry-left-keeps-it"],
+    )
+    async def test_deleting_an_entry_drops_tracking_no_entry_uses(
+        self, hass, mock_hub, second_entry, kept
+    ):
+        mock_hub.login = AsyncMock(side_effect=refresh_token_rejected_error())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        if second_entry:
+            data = make_config_entry_data()
+            data[CONF_INSTALLATION] = "222"
+            MockConfigEntry(domain=DOMAIN, data=data).add_to_hass(hass)
+        other = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="other@example.com")
+        )
+        other.add_to_hass(hass)
+        _keep_another_account_loaded(hass, "third@example.com")
+        for refused in (entry, other):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, refused, mock_hub)
+
+        await async_remove_entry(hass, entry)
+
+        refusals = hass.data[DOMAIN]["refresh_refusals"]
+        assert ("test@example.com" in refusals) is kept
+        assert "other@example.com" in refusals
 
 
 # ===========================================================================
@@ -4070,6 +4161,79 @@ class TestCoTenantStoredTokenRecovery:
 
         assert hub.get_refresh_token() == "own"
         hub.client.refresh_token.assert_awaited_once()
+
+    async def _persisting_shared_hub(self, hass, clock):
+        """A real shared hub whose own token Verisure has refused for 15
+        minutes, held by a running co-tenant entry; its notice is up."""
+        co_tenant = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "shared"},
+        )
+        co_tenant.add_to_hass(hass)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = co_tenant
+        hub.client.password = ""
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        session = _new_session_record(hub)
+        session["holders"].add(co_tenant.entry_id)
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "test@example.com"
+        ] = session
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        clock.advance(minutes=15)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.refresh_refusals_persisting
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+        return hub
+
+    def _joining_entry(self, hass):
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = "own"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        return entry
+
+    async def _assert_shared_token_and_period_kept(self, hub, clock):
+        assert hub.get_refresh_token() == "shared"
+        assert hub.refresh_refusals_persisting
+        assert hub.refresh_refusal_alert_raised
+        # Still paced from the shared client's own last attempt.
+        hub.client.refresh_token = AsyncMock(return_value=True)
+        clock.advance(minutes=1)
+        with pytest.raises(VerisureOwaError, match="next try after"):
+            await hub.client._check_authentication_token()
+        hub.client.refresh_token.assert_not_awaited()
+
+    async def test_a_genuinely_rejected_adopted_token_is_handed_back(
+        self, hass, mock_hub, clock
+    ):
+        hub = await self._persisting_shared_hub(hass, clock)
+        entry = self._joining_entry(hass)
+        rejected = SessionExpiredError("Invalid Session", http_status=403)
+        rejected.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        hub.client.refresh_token = AsyncMock(side_effect=rejected)
+
+        with pytest.raises(ConfigEntryAuthFailed):
+            await self._attempt(hass, entry, mock_hub)
+
+        hub.client.refresh_token.assert_awaited_once()
+        await self._assert_shared_token_and_period_kept(hub, clock)
+
+    async def test_a_refused_adopted_token_is_handed_back(self, hass, mock_hub, clock):
+        hub = await self._persisting_shared_hub(hass, clock)
+        entry = self._joining_entry(hass)
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+        hub.client.refresh_token.assert_awaited_once()
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+        await self._assert_shared_token_and_period_kept(hub, clock)
 
     async def test_a_notice_due_while_detached_appears_on_reattach(self, hass, clock):
         """Refusals that reach 15 minutes while the hub has no entry (only a

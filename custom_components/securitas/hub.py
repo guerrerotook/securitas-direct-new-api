@@ -49,7 +49,10 @@ from .verisure_owa_api import (
     VerisureOwaError,
 )
 from .verisure_owa_api.client import VerisureOwaClient
-from .verisure_owa_api.client._base import _token_fingerprint
+from .verisure_owa_api.client._base import (
+    RefreshTokenSnapshot,
+    _token_fingerprint,
+)
 from .verisure_owa_api.exceptions import is_account_blocked, is_genuine_auth_failure
 from .verisure_owa_api.http_transport import HttpTransport
 
@@ -93,6 +96,7 @@ def raise_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
 
 @callback
 def clear_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
+    """Clear the account's renewal-refused issue, if raised."""
     ir.async_delete_issue(hass, DOMAIN, _renewal_refused_issue_id(username))
 
 
@@ -589,10 +593,19 @@ class VerisureHub:
         """True once Verisure has kept refusing the client's refresh token."""
         return self.client.refresh_refusals_persisting
 
-    def adopt_refresh_token(self, value: str) -> None:
+    @property
+    def refresh_refusal_alert_raised(self) -> bool:
+        """True from the client's refusal alert until a renewal succeeds."""
+        return self.client.refresh_refusal_alert_raised
+
+    def adopt_refresh_token(self, value: str) -> RefreshTokenSnapshot:
         """Hand the client the stored refresh token of an entry joining this
         shared session."""
-        self.client.adopt_refresh_token(value)
+        return self.client.adopt_refresh_token(value)
+
+    def restore_refresh_token(self, snapshot: RefreshTokenSnapshot) -> None:
+        """Hand the client back what adopt_refresh_token replaced."""
+        self.client.restore_refresh_token(snapshot)
 
     def _persist_refresh_token(self, value: str) -> None:
         """Write a rotated refresh token back to the config entry.
