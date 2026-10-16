@@ -69,6 +69,7 @@ from custom_components.securitas.const import API_CACHE_TTL
 from custom_components.securitas.hub import (
     _async_notify,
     _notify,
+    raise_renewal_refused_issue,
 )
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
 from custom_components.securitas.verisure_owa_api.const import (
@@ -2613,6 +2614,19 @@ _SIGN_IN_ISSUE_ID = (
 )
 
 
+def _renewal_refused_issues(hass):
+    return {
+        issue_id: issue
+        for (domain, issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue_id.startswith("renewal_refused_")
+    }
+
+
+_RENEWAL_REFUSED_ISSUE_ID = (
+    "renewal_refused_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+)
+
+
 class TestSignInIssue:
     """A login setup cannot complete raises a Repairs issue saying why Home
     Assistant asks to sign the account in again. A sign-in that works, or no
@@ -2807,6 +2821,38 @@ class TestSignInIssue:
         assert [i.translation_placeholders for i in _sign_in_issues(hass).values()] == [
             {"username": "other@example.com"}
         ]
+
+    async def test_deleting_the_accounts_last_entry_clears_its_renewal_repair(
+        self, hass
+    ):
+        """The renewal-refused notice goes with the account's last entry, by
+        the same rule as the sign-in one; another account's stays."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        other = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="other@example.com")
+        )
+        other.add_to_hass(hass)
+        raise_renewal_refused_issue(hass, "test@example.com")
+        raise_renewal_refused_issue(hass, "other@example.com")
+
+        await async_remove_entry(hass, entry)
+
+        assert [
+            i.translation_placeholders for i in _renewal_refused_issues(hass).values()
+        ] == [{"username": "other@example.com"}]
+
+    async def test_a_successful_sign_in_clears_the_renewal_repair(self, hass, mock_hub):
+        """A sign-in at setup proves the account works again."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_renewal_refused_issue(hass, "test@example.com")
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+
+        assert await self._set_up(hass, entry, mock_hub) is True
+
+        mock_hub.login.assert_awaited_once()
+        assert _renewal_refused_issues(hass) == {}
 
 
 class TestCodeHashMigration:

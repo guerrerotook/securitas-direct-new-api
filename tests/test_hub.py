@@ -1,11 +1,14 @@
 """Tests for VerisureHub orchestration methods."""
 
 import asyncio
+import hashlib
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.const import CONF_PASSWORD
+from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
@@ -81,6 +84,106 @@ class TestConstruction:
         hub = make_hub()
         hub.client.refresh_token_value = "current-refresh-token"
         assert hub.get_refresh_token() == "current-refresh-token"
+
+
+# ── Renewal-refused Repairs issue ───────────────────────────────────────────
+
+
+_RENEWAL_REFUSED_ID = (
+    "renewal_refused_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+)
+_SIGN_IN_ID = "sign_in_again_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+
+
+def _domain_issues(hass) -> dict:
+    return {
+        issue_id: issue
+        for (domain, issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN
+    }
+
+
+class TestRenewalRefusedIssue:
+    """When the client says Verisure has kept refusing the saved sign-in, the
+    hub raises a Repairs issue of its own; when a renewal works again, it
+    clears it. The sign-in-again issue is never touched."""
+
+    @staticmethod
+    def _hub(hass, *, attached: bool = True) -> VerisureHub:
+        entry = MockConfigEntry(domain=DOMAIN, data={"username": "test@example.com"})
+        entry.add_to_hass(hass)
+        config = {
+            "username": "test@example.com",
+            "password": "",
+            "country": "PT",
+            "device_id": "dev",
+            "unique_id": "uid",
+            "idDeviceIndigitall": "indi",
+            "delay_check_operation": 0.01,
+        }
+        return VerisureHub(
+            config,
+            config_entry=entry if attached else None,
+            http_client=MagicMock(),
+            hass=hass,
+        )
+
+    async def test_the_clients_alert_raises_the_issue(self, hass):
+        """The client's alert reaches the hub, which raises a warning that is
+        not saved across restarts (its placeholder is the email)."""
+        hub = self._hub(hass)
+
+        hub.client._notify_refusal_alert(True)
+
+        issues = _domain_issues(hass)
+        assert list(issues) == [_RENEWAL_REFUSED_ID]
+        issue = issues[_RENEWAL_REFUSED_ID]
+        assert issue.translation_key == "renewal_refused"
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.is_persistent is False
+        assert issue.is_fixable is False
+        assert issue.translation_placeholders == {"username": "test@example.com"}
+        assert "@" not in _RENEWAL_REFUSED_ID
+
+    async def test_the_clients_all_clear_deletes_the_issue(self, hass):
+        hub = self._hub(hass)
+        hub.client._notify_refusal_alert(True)
+
+        hub.client._notify_refusal_alert(False)
+
+        assert _domain_issues(hass) == {}
+
+    async def test_neither_touches_the_sign_in_again_issue(self, hass):
+        hub = self._hub(hass)
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            _SIGN_IN_ID,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="sign_in_again",
+            translation_placeholders={"username": "test@example.com"},
+        )
+
+        hub.client._notify_refusal_alert(True)
+        assert set(_domain_issues(hass)) == {_SIGN_IN_ID, _RENEWAL_REFUSED_ID}
+
+        hub.client._notify_refusal_alert(False)
+        assert set(_domain_issues(hass)) == {_SIGN_IN_ID}
+
+    async def test_a_hub_without_a_config_entry_does_nothing(self, hass):
+        """A hub retired by a sign-in, or a config-flow hub, must not raise an
+        alert the sign-in cleared, nor clear one a live hub raised."""
+        live = self._hub(hass)
+        retired = self._hub(hass, attached=False)
+
+        retired.client._notify_refusal_alert(True)
+        assert _domain_issues(hass) == {}
+
+        live.client._notify_refusal_alert(True)
+        retired.client._notify_refusal_alert(False)
+        assert list(_domain_issues(hass)) == [_RENEWAL_REFUSED_ID]
 
 
 class TestRefreshTokenPersistence:

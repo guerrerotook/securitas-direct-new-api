@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import logging
 from collections.abc import Callable
 from functools import partial
@@ -15,7 +16,8 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -52,6 +54,46 @@ from .verisure_owa_api.exceptions import is_account_blocked, is_genuine_auth_fai
 from .verisure_owa_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
+
+_SIGN_IN_ISSUE = "sign_in_again_"
+_RENEWAL_REFUSED_ISSUE = "renewal_refused_"
+
+
+def _hashed_issue_id(prefix: str, key: str) -> str:
+    # Hashed: Home Assistant saves issue IDs, and the email must not be.
+    return prefix + hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+def _sign_in_issue_id(username: str) -> str:
+    return _hashed_issue_id(_SIGN_IN_ISSUE, username)
+
+
+def _renewal_refused_issue_id(username: str) -> str:
+    return _hashed_issue_id(_RENEWAL_REFUSED_ISSUE, username)
+
+
+@callback
+def raise_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
+    """Tell the user in Repairs that Verisure keeps refusing the saved sign-in.
+
+    Not persistent, for the same reason as the sign-in issue: the
+    ``username`` placeholder is the email.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _renewal_refused_issue_id(username),
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="renewal_refused",
+        translation_placeholders={"username": username},
+    )
+
+
+@callback
+def clear_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
+    ir.async_delete_issue(hass, DOMAIN, _renewal_refused_issue_id(username))
 
 
 async def _async_notify(
@@ -184,6 +226,7 @@ class VerisureHub:
             log_filter=self.log_filter,
             refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
             on_refresh_token_changed=self._persist_refresh_token,
+            on_refresh_refusal_alert=self._refresh_refusal_alert,
         )
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
@@ -589,6 +632,20 @@ class VerisureHub:
         _LOGGER.debug(
             "[refresh] persist refresh token: persist_fp=%s outcome=%s", fp, outcome
         )
+
+    def _refresh_refusal_alert(self, active: bool) -> None:
+        """Raise or clear the renewal-refused issue for the client's account.
+
+        A hub without a config entry (retired by reauth or Reconfigure, or
+        built by the config flow) must not re-raise an issue the sign-in
+        cleared.
+        """
+        if self.config_entry is None:
+            return
+        if active:
+            raise_renewal_refused_issue(self.hass, self.client.username)
+        else:
+            clear_renewal_refused_issue(self.hass, self.client.username)
 
     def persist_current_refresh_token(self) -> None:
         """Write the current in-memory refresh token to the config entry now.

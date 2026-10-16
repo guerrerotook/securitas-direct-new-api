@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
 import logging
 import socket
@@ -154,10 +153,15 @@ from .discovery import (  # noqa: F401 — re-exported for backwards compatibili
 )
 from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
+    _RENEWAL_REFUSED_ISSUE,
+    _SIGN_IN_ISSUE,
     VerisureDevice,
     VerisureHub,
     _async_notify,
+    _hashed_issue_id,
     _notify,
+    _renewal_refused_issue_id,
+    _sign_in_issue_id,
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
@@ -462,16 +466,6 @@ def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 _DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"
-_SIGN_IN_ISSUE = "sign_in_again_"
-
-
-def _hashed_issue_id(prefix: str, key: str) -> str:
-    # Hashed: Home Assistant saves issue IDs, and the email must not be.
-    return prefix + hashlib.sha256(key.encode()).hexdigest()[:12]
-
-
-def _sign_in_issue_id(username: str) -> str:
-    return _hashed_issue_id(_SIGN_IN_ISSUE, username)
 
 
 @callback
@@ -501,16 +495,18 @@ def _raise_sign_in_issue(
 def _clear_sign_in_issues(
     hass: HomeAssistant, username: str | None, removing: ConfigEntry | None = None
 ) -> None:
-    """Clear ``username``'s issue, and those of accounts no entry uses any
-    more: signing an entry in again as another account, or deleting an
-    account's last entry, leaves nothing to sign in again there.
+    """Clear ``username``'s sign-in and renewal-refused issues, and those of
+    accounts no entry uses any more: signing an entry in again as another
+    account, or deleting an account's last entry, leaves nothing to sign in
+    again there.
 
     ``removing`` is the entry being deleted, which no longer counts.
     """
     raised = [
         issue_id
         for domain, issue_id in ir.async_get(hass).issues
-        if domain == DOMAIN and issue_id.startswith(_SIGN_IN_ISSUE)
+        if domain == DOMAIN
+        and issue_id.startswith((_SIGN_IN_ISSUE, _RENEWAL_REFUSED_ISSUE))
     ]
     if not raised:
         return
@@ -520,8 +516,10 @@ def _clear_sign_in_issues(
             continue
         if entry_username := entry.data.get(CONF_USERNAME):
             in_use.add(_sign_in_issue_id(entry_username))
+            in_use.add(_renewal_refused_issue_id(entry_username))
     if username is not None:
         in_use.discard(_sign_in_issue_id(username))
+        in_use.discard(_renewal_refused_issue_id(username))
     for issue_id in raised:
         if issue_id not in in_use:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
