@@ -654,6 +654,16 @@ class _ClientBase:
         """True from the refusal alert until a renewal succeeds."""
         return self._refusal_alert_raised
 
+    @property
+    def renewal_lock(self) -> asyncio.Lock:
+        """The lock every token renewal holds.
+
+        Hold it to replace the refresh token without racing a renewal. Not
+        re-entrant: while holding it, sign in with refresh_token() or login(),
+        which never take it, not with anything that renews (_ensure_auth).
+        """
+        return self._auth_lock
+
     def adopt_refresh_token(self, value: str) -> RefreshTokenSnapshot:
         """Replace the refresh token with the stored one of an entry joining
         this shared session.

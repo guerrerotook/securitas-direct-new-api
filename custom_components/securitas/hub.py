@@ -598,6 +598,11 @@ class VerisureHub:
         """True from the client's refusal alert until a renewal succeeds."""
         return self.client.refresh_refusal_alert_raised
 
+    @property
+    def renewal_lock(self) -> asyncio.Lock:
+        """The lock the client's token renewals hold; see the client's."""
+        return self.client.renewal_lock
+
     def adopt_refresh_token(self, value: str) -> RefreshTokenSnapshot:
         """Hand the client the stored refresh token of an entry joining this
         shared session."""

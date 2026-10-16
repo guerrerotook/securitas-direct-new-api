@@ -1,5 +1,6 @@
 """Tests for custom_components/securitas/__init__.py."""
 
+import asyncio
 import contextlib
 import hashlib
 import os
@@ -93,6 +94,7 @@ from tests.conftest import (
     make_installation,
     make_securitas_hub_mock,
     refresh_login_crash_error,
+    refresh_response,
     refresh_token_rejected_error,
 )
 from tests.test_hub import make_hub
@@ -4233,6 +4235,110 @@ class TestCoTenantStoredTokenRecovery:
 
         hub.client.refresh_token.assert_awaited_once()
         assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+        await self._assert_shared_token_and_period_kept(hub, clock)
+
+    async def test_a_renewal_in_flight_is_never_undone_by_an_adoption(
+        self, hass, clock
+    ):
+        """A running renewal of the shared token and a joining entry's setup
+        overlap. The renewal succeeds and rotates the token; the joining
+        entry must not then put back the token the renewal replaced, nor
+        reopen the refusal period the renewal ended."""
+        hub = await self._persisting_shared_hub(hass, clock)
+        entry = self._joining_entry(hass)
+        clock.advance(minutes=5)  # a paced renewal is due
+        renewing = asyncio.Event()
+        release_renewal = asyncio.Event()
+        renewal_done = asyncio.Event()
+        presented: list[str] = []
+
+        async def execute(content, operation, **kwargs):
+            token = content["variables"]["refreshToken"]
+            presented.append(token)
+            if token == "shared":
+                renewing.set()
+                await asyncio.wait_for(release_renewal.wait(), 2)
+                return refresh_response(refresh_token="rotated-and-valid")
+            await asyncio.wait_for(renewal_done.wait(), 2)
+            raise refresh_token_rejected_error()
+
+        del hub.client.refresh_token  # the real refresh, rotation and callbacks
+        hub.client._execute_raw = execute
+
+        async def renew():
+            try:
+                await hub.client._check_authentication_token()
+            finally:
+                renewal_done.set()
+
+        renewal = asyncio.create_task(renew())
+        await asyncio.wait_for(renewing.wait(), 2)
+        joining = asyncio.create_task(
+            _get_or_create_session(hass, dict(entry.data), entry)
+        )
+        try:
+            for _ in range(5):
+                await asyncio.sleep(0)
+            release_renewal.set()
+            results = await asyncio.wait_for(
+                asyncio.gather(renewal, joining, return_exceptions=True), 2
+            )
+        finally:
+            for task in (renewal, joining):
+                task.cancel()
+            await asyncio.gather(renewal, joining, return_exceptions=True)
+
+        assert hub.get_refresh_token() == "rotated-and-valid"
+        assert results == [None, hub]
+        assert presented == ["shared"]
+        assert hub.config_entry.data[CONF_REFRESH_TOKEN] == "rotated-and-valid"
+        assert not hub.refresh_refusals_persisting
+        assert not hub.refresh_refusal_alert_raised
+        assert _renewal_refused_issues(hass) == {}
+
+    async def test_an_adopted_token_signs_in_through_the_real_refresh(
+        self, hass, clock
+    ):
+        """The adoption holds the renewal lock while it signs in, so the
+        sign-in must not wait for that lock itself."""
+        hub = await self._persisting_shared_hub(hass, clock)
+        entry = self._joining_entry(hass)
+
+        async def execute(content, operation, **kwargs):
+            assert content["variables"]["refreshToken"] == "own"
+            return refresh_response(refresh_token="own-rotated")
+
+        del hub.client.refresh_token
+        hub.client._execute_raw = execute
+
+        session = await asyncio.wait_for(
+            _get_or_create_session(hass, dict(entry.data), entry), 2
+        )
+
+        assert session is hub
+        assert hub.get_refresh_token() == "own-rotated"
+        assert not hub.renewal_lock.locked()
+        assert _renewal_refused_issues(hass) == {}
+
+    async def test_a_cancelled_adoption_hands_the_shared_token_back(self, hass, clock):
+        hub = await self._persisting_shared_hub(hass, clock)
+        entry = self._joining_entry(hass)
+        signing_in = asyncio.Event()
+
+        async def never_answers():
+            signing_in.set()
+            await asyncio.Event().wait()
+
+        hub.client.refresh_token = never_answers
+        joining = asyncio.create_task(
+            _get_or_create_session(hass, dict(entry.data), entry)
+        )
+        await asyncio.wait_for(signing_in.wait(), 2)
+        assert hub.get_refresh_token() == "own"
+        joining.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await joining
+
         await self._assert_shared_token_and_period_kept(hub, clock)
 
     async def test_a_notice_due_while_detached_appears_on_reattach(self, hass, clock):

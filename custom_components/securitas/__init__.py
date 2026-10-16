@@ -956,6 +956,30 @@ def _release_flow_hold(hass: HomeAssistant, username: str, holder: str) -> None:
         _release_session_hold(sessions, username, session, holder)
 
 
+def _should_adopt(client: VerisureHub, stored_token: str) -> bool:
+    """A shared client whose token Verisure keeps refusing, reached with a
+    different stored token: a co-tenant's own, which may be older or newer."""
+    return (
+        client.refresh_refusals_persisting
+        and stored_token != client.get_refresh_token()
+    )
+
+
+async def _sign_in_with_adopted_token(
+    hass: HomeAssistant, client: VerisureHub, username: str, stored_token: str
+) -> None:
+    """Try a joining entry's stored token on the shared client; the caller
+    holds the client's renewal lock."""
+    replaced = client.adopt_refresh_token(stored_token)
+    try:
+        await _login_or_raise(hass, client, username)
+    except BaseException:
+        # The running entries still depend on the shared token, which may yet
+        # recover.
+        client.restore_refresh_token(replaced)
+        raise
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -998,24 +1022,18 @@ async def _get_or_create_session(
             # the xSRefreshLogin 'fr' crash on the next restart.
             if client.config_entry is None:
                 _attach_token_persistence(client, entry)
-            # A shared client whose token Verisure keeps refusing, reached
-            # with a different stored token: a co-tenant's own, which may be
-            # older or newer. Try it on the shared client.
             stored_token = config.get(CONF_REFRESH_TOKEN)
-            if (
-                client.refresh_refusals_persisting
-                and stored_token
-                and stored_token != client.get_refresh_token()
-            ):
-                replaced = client.adopt_refresh_token(stored_token)
-                try:
-                    await _login_or_raise(hass, client, username)
-                except BaseException:
-                    # The running entries still depend on the shared token,
-                    # which may yet recover.
-                    client.restore_refresh_token(replaced)
-                    raise
-                signed_in = True
+            if stored_token and _should_adopt(client, stored_token):
+                # Under the renewal lock, decided again once held: a renewal
+                # running now may recover the shared token, and must not be
+                # undone by rolling back a failed adoption. The sign-in calls
+                # Verisure directly and never takes this lock.
+                async with client.renewal_lock:
+                    if _should_adopt(client, stored_token):
+                        await _sign_in_with_adopted_token(
+                            hass, client, username, stored_token
+                        )
+                        signed_in = True
         else:
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
