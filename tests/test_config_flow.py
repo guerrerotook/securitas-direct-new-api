@@ -2693,7 +2693,7 @@ def _add_other_account_entry(hass):
 
 
 def _crash_streaks(hass) -> dict:
-    return hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {})
+    return hass.data.get(DOMAIN, {}).get("refresh_refusals", {})
 
 
 def _other_account_hub_signing_in_slowly():

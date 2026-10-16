@@ -3,7 +3,7 @@
 import contextlib
 import hashlib
 from collections import Counter, OrderedDict
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,6 +23,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
+import custom_components.securitas as securitas_init
 from custom_components.securitas import (
     _INSTALLATIONS_CACHE,
     _OPTIONS_MANAGED_FIELDS,
@@ -72,6 +73,7 @@ from custom_components.securitas.hub import (
     raise_renewal_refused_issue,
 )
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
+from custom_components.securitas.verisure_owa_api.client import _base as client_base
 from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
@@ -3604,19 +3606,54 @@ class TestServiceDescriptionTargets:
 
 
 # ===========================================================================
-# TestSetupRefreshCrashEscalation
+# TestSetupRefreshRefusals
 # ===========================================================================
 
 
-class TestSetupRefreshCrashEscalation:
-    """A stored token that keeps crashing xSRefreshLogin, or being refused by it
-    (err 4), prompts reauth.
+class _Clock:
+    """The time ``datetime.now()`` reports in setup and the client, moved by hand."""
 
-    At setup the token comes straight off disk with no in-process evidence it
-    was ever valid, and every diagnosed instance of the crash was a dead token
-    (#557, #568). One retry absorbs a momentary server blip; the second
-    consecutive crash or refusal must escalate to ConfigEntryAuthFailed so the
-    user can recover by re-entering the password instead of deleting the entry.
+    def __init__(self) -> None:
+        self.utc = datetime(2026, 10, 16, 14, 44, tzinfo=UTC)
+
+    def advance(self, **kwargs: float) -> None:
+        self.utc += timedelta(**kwargs)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = _Clock()
+
+    class _FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return fake.utc.replace(tzinfo=None)
+            return fake.utc.astimezone(tz)
+
+    monkeypatch.setattr(securitas_init, "datetime", _FakeDatetime)
+    monkeypatch.setattr(client_base, "datetime", _FakeDatetime)
+    return fake
+
+
+_REFUSALS = pytest.mark.parametrize(
+    "make_refusal",
+    [refresh_token_rejected_error, refresh_login_crash_error],
+    ids=["err4", "crash"],
+)
+
+_ALERT_LOG = "Verisure has refused to renew the saved sign-in"
+
+
+class TestSetupRefreshRefusals:
+    """Verisure refusing the stored token at setup (err 4, or the #568
+    refresh-login crash) is retried for as long as it lasts, never turned into
+    a reauth prompt.
+
+    Once refusals have lasted 15 minutes a Repairs notice says how to sign in
+    again. The tracking is per account and lives in hass.data, because each
+    retry builds a fresh hub and entries on one account alternate as session
+    creator.
     """
 
     @pytest.fixture
@@ -3638,31 +3675,80 @@ class TestSetupRefreshCrashEscalation:
         ):
             return await async_setup_entry(hass, entry)
 
-    async def test_second_consecutive_crash_prompts_reauth(self, hass, mock_hub):
-        mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+    @_REFUSALS
+    async def test_refusals_keep_retrying_and_never_prompt_reauth(
+        self, hass, mock_hub, clock, make_refusal
+    ):
+        mock_hub.login = AsyncMock(side_effect=make_refusal())
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
-        with pytest.raises(ConfigEntryNotReady):
-            await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(ConfigEntryAuthFailed, match="refresh-login crash"):
-            await self._attempt(hass, entry, mock_hub)
+        for _ in range(8):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+            clock.advance(minutes=10)
 
-    async def test_second_consecutive_rejection_prompts_reauth(self, hass, mock_hub):
-        """Verisure refusing the stored token with err 4 / 404 escalates the same way."""
+        assert mock_hub.login.await_count == 8
+        assert _sign_in_issues(hass) == {}
+
+    @_REFUSALS
+    async def test_the_notice_appears_at_the_first_refusal_15_minutes_in(
+        self, hass, mock_hub, clock, caplog, make_refusal
+    ):
+        mock_hub.login = AsyncMock(side_effect=make_refusal())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        for _ in range(3):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+            clock.advance(minutes=7)
+        assert _renewal_refused_issues(hass) == {}
+        assert _ALERT_LOG not in caplog.text
+
+        # 21 minutes after the first refusal; then later ones.
+        for _ in range(3):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+            clock.advance(minutes=10)
+
+        issues = _renewal_refused_issues(hass)
+        assert list(issues) == [_RENEWAL_REFUSED_ISSUE_ID]
+        assert issues[_RENEWAL_REFUSED_ISSUE_ID].translation_placeholders == {
+            "username": "test@example.com"
+        }
+        alerts = [
+            r
+            for r in caplog.records
+            if r.levelname == "WARNING" and _ALERT_LOG in r.getMessage()
+        ]
+        assert len(alerts) == 1
+        assert _sign_in_issues(hass) == {}
+
+    async def test_a_cleared_notice_is_not_raised_again_in_the_same_period(
+        self, hass, mock_hub, clock
+    ):
+        """Raised once per period: dismissing it does not bring it back on
+        the next refusal."""
         mock_hub.login = AsyncMock(side_effect=refresh_token_rejected_error())
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
-
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(
-            ConfigEntryAuthFailed, match=r"refresh-token rejection \(err 4\)"
-        ):
+        clock.advance(minutes=15)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        ir.async_delete_issue(hass, DOMAIN, _RENEWAL_REFUSED_ISSUE_ID)
+
+        clock.advance(minutes=10)
+        with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
 
-    async def test_streak_is_per_account(self, hass, mock_hub):
-        """Entries on different accounts retry different tokens: separate streaks."""
+        assert _renewal_refused_issues(hass) == {}
+
+    async def test_tracking_is_per_account(self, hass, mock_hub, clock):
+        """Entries on different accounts retry different tokens: a refusal on
+        one account does not start the other's period."""
         mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
         entry1 = MockConfigEntry(
             domain=DOMAIN, data=make_config_entry_data(username="one@example.com")
@@ -3675,13 +3761,18 @@ class TestSetupRefreshCrashEscalation:
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry1, mock_hub)
+        clock.advance(minutes=15)
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry2, mock_hub)
 
-    async def test_entries_on_one_account_share_the_streak(self, hass, mock_hub):
+        assert _renewal_refused_issues(hass) == {}
+
+    async def test_entries_on_one_account_share_the_tracking(
+        self, hass, mock_hub, clock
+    ):
         """Two installations on one account retry the same stored token, and
-        alternate as session creator; counting per entry would never reach the
-        threshold."""
+        alternate as session creator; tracking per entry would restart the
+        period at every switch."""
         mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
         data1 = make_config_entry_data()
         data1[CONF_INSTALLATION] = "111"
@@ -3694,12 +3785,17 @@ class TestSetupRefreshCrashEscalation:
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry1, mock_hub)
-        with pytest.raises(ConfigEntryAuthFailed):
+        clock.advance(minutes=15)
+        with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry2, mock_hub)
 
-    async def test_setup_via_a_shared_session_resets_the_streak(self, hass, mock_hub):
-        """A crash, then setup succeeding on a co-tenant's session (the reuse
-        branch), must clear the count: any session handed back resets it."""
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+
+    async def test_setup_via_a_shared_session_resets_the_tracking(
+        self, hass, mock_hub, clock
+    ):
+        """A refusal, then setup succeeding on a co-tenant's session (the reuse
+        branch), must end the period: any session handed back resets it."""
         mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
@@ -3720,11 +3816,14 @@ class TestSetupRefreshCrashEscalation:
         )
         await async_unload_entry(hass, entry)
 
+        clock.advance(minutes=15)
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
+        assert _renewal_refused_issues(hass) == {}
 
-    async def test_successful_login_resets_the_streak(self, hass, mock_hub):
-        """Crash, success, crash: the later crash starts a fresh streak.
+    async def test_successful_login_resets_the_tracking(self, hass, mock_hub, clock):
+        """Refusal, success, refusal 15 minutes later: the later refusal
+        starts a fresh period, so no notice.
 
         Another account stays loaded throughout so the unload in the middle
         does not tear down hass.data[DOMAIN] wholesale, which would hide a
@@ -3750,11 +3849,14 @@ class TestSetupRefreshCrashEscalation:
             await self._attempt(hass, entry, mock_hub)
         assert await self._attempt(hass, entry, mock_hub) is True
         await async_unload_entry(hass, entry)
+        clock.advance(minutes=15)
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
 
+        assert _renewal_refused_issues(hass) == {}
+
     async def test_other_transient_failures_never_escalate(self, hass, mock_hub):
-        """A 5xx is not the crash: it retries forever, as before."""
+        """A 5xx is not a refusal: it retries forever, as before."""
         mock_hub.login = AsyncMock(
             side_effect=VerisureOwaError("boom", http_status=500)
         )
@@ -3765,10 +3867,14 @@ class TestSetupRefreshCrashEscalation:
             with pytest.raises(ConfigEntryNotReady):
                 await self._attempt(hass, entry, mock_hub)
 
-    async def test_non_crash_failure_does_not_reset_the_streak(self, hass, mock_hub):
-        """Crash, timeout, crash: still no successful renewal, so reauth."""
+    async def test_other_transient_failures_neither_start_nor_reset_the_period(
+        self, hass, mock_hub, clock
+    ):
+        """Timeout, refusal, timeout, refusal 15 minutes after the first
+        refusal: still no successful renewal, so the notice appears."""
         mock_hub.login = AsyncMock(
             side_effect=[
+                APIConnectionError("timeout"),
                 refresh_login_crash_error(),
                 APIConnectionError("timeout"),
                 refresh_login_crash_error(),
@@ -3777,12 +3883,39 @@ class TestSetupRefreshCrashEscalation:
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
+        for _ in range(3):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+            assert _renewal_refused_issues(hass) == {}
+            clock.advance(minutes=10)
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(ConfigEntryNotReady):
-            await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(ConfigEntryAuthFailed):
-            await self._attempt(hass, entry, mock_hub)
+
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
+
+    @pytest.mark.parametrize(
+        ("persisting", "cleared"),
+        [(False, True), (True, False)],
+        ids=["accepted-session-clears", "still-refused-session-keeps"],
+    )
+    async def test_a_handed_back_session_clears_the_notice_unless_still_refused(
+        self, hass, mock_hub, persisting, cleared
+    ):
+        """Setup reusing a co-tenant's session clears the notice when that
+        session's renewals are not being refused."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_renewal_refused_issue(hass, "test@example.com")
+        mock_hub.refresh_refusals_persisting = persisting
+        mock_hub.config_entry = entry
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "test@example.com"
+        ] = {"hub": mock_hub, "holders": {"co-tenant-entry-id"}}
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        mock_hub.login.assert_not_awaited()
+        assert (_renewal_refused_issues(hass) == {}) is cleared
 
 
 # ===========================================================================
@@ -3890,3 +4023,49 @@ class TestCoTenantStoredTokenRecovery:
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
+
+    async def test_a_single_refusal_does_not_adopt_but_persisting_does(
+        self, hass, clock
+    ):
+        """One refusal may be a passing fault at Verisure: the shared client's
+        token keeps its chance. Once refusals have lasted 15 minutes, a joining
+        entry's own stored token is tried instead."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "own"},
+        )
+        entry.add_to_hass(hass)
+        co_tenant = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "shared"},
+        )
+        co_tenant.add_to_hass(hass)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = co_tenant
+        hub.client.password = ""
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        session = _new_session_record(hub)
+        session["holders"].add(co_tenant.entry_id)
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "test@example.com"
+        ] = session
+
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        await _get_or_create_session(hass, dict(entry.data), entry)
+
+        assert hub.get_refresh_token() == "shared"
+        assert hub.client.refresh_token.await_count == 1
+
+        clock.advance(minutes=15)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.client.refresh_refusals_persisting
+        hub.client.refresh_token = AsyncMock(return_value=True)
+
+        await _get_or_create_session(hass, dict(entry.data), entry)
+
+        assert hub.get_refresh_token() == "own"
+        hub.client.refresh_token.assert_awaited_once()
