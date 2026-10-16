@@ -676,6 +676,7 @@ class _ClientBase:
     def restore_refresh_token(self, snapshot: RefreshTokenSnapshot) -> None:
         """Undo adopt_refresh_token after the adopted token failed."""
         self.refresh_token_value = snapshot.token
+        self._register_secret("refresh_token", snapshot.token)
         self._refresh_refused_since = snapshot.refused_since
         self._refusals_persisting = snapshot.persisting
         self._last_renewal_attempt = snapshot.last_renewal_attempt

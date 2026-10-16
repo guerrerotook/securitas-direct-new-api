@@ -1,6 +1,7 @@
 """Tests for VerisureOwaClient authentication flow."""
 
 import asyncio
+import logging
 import os
 import time
 from datetime import UTC, datetime, timedelta
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 from pydantic import BaseModel
 
+from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
     _base,
@@ -1024,6 +1026,27 @@ class TestRefusalsKeepRetrying:
         clock.advance(minutes=4)
         await _poll(client)
         assert client.refresh_token.await_count == calls + 1
+
+    async def test_restoring_masks_the_restored_token_in_logs(self, mock_transport):
+        """The log filter masks one refresh token at a time: after an adoption
+        is undone it must mask the token back in use, not the failed one."""
+        log_filter = SensitiveDataFilter()
+        client = _token_only_client(mock_transport, log_filter=log_filter)
+
+        client.restore_refresh_token(client.adopt_refresh_token("co-tenant-token"))
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.DEBUG,
+            pathname="",
+            lineno=0,
+            msg="presenting has-refresh-token",
+            args=(),
+            exc_info=None,
+        )
+        log_filter.filter(record)
+        assert "has-refresh-token" not in record.msg
+        assert "[REFRESH_TOKEN]" in record.msg
 
     async def test_restoring_keeps_the_period_start(self, mock_transport, clock):
         """A period not yet persisting keeps its start: the refusal 15 minutes
