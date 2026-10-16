@@ -4,6 +4,10 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.10.0
 
+### Fixed
+
+- **The integration asked for your password when Verisure refused the saved sign-in for a couple of minutes** ([#647](https://github.com/guerrerotook/securitas-direct-new-api/issues/647)): when Verisure refused to renew the saved sign-in a few times in about two minutes, the integration gave up, asked you to enter your password again, and stayed unavailable until you did — even though such a refusal is often a temporary problem at Verisure. It now keeps trying, every few minutes once the refusals have lasted 15 minutes. At that point a notice in **Settings → Repairs** says so and explains how to sign in again yourself if it doesn't recover: open the entry's **⋮** menu and choose **Reconfigure**. The notice clears itself once Verisure accepts the sign-in again. If Verisure rejects the sign-in outright, you are still asked for your password at once. Thanks to [@mglmor-pt](https://github.com/mglmor-pt) for the report and the log.
+
 ## v5.9.2
 
 ### Fixed
