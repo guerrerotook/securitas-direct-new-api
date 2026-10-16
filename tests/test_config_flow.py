@@ -2443,7 +2443,7 @@ async def test_closing_a_flow_during_an_entrys_token_recovery_keeps_the_session(
     hub = _hub_factory()
     hub.config = make_config_entry_data()
     flow = await _start_user_flow(hass, hub)
-    hub.refresh_token_is_dead = True
+    hub.refresh_refusals_persisting = True
     hub.get_refresh_token.return_value = "dead-token"
     data = make_config_entry_data()
     data[CONF_REFRESH_TOKEN] = "fresh-token"
@@ -2742,7 +2742,7 @@ async def test_deleting_an_entry_whose_token_recovery_failed_releases_it(hass):
     hub = _hub_factory()
     hub.config = make_config_entry_data()
     flow = await _start_user_flow(hass, hub)
-    hub.refresh_token_is_dead = True
+    hub.refresh_refusals_persisting = True
     hub.get_refresh_token.return_value = "dead-token"
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2966,7 +2966,7 @@ async def test_a_dead_token_is_not_handed_to_the_co_tenant(hass):
         AsyncMock(side_effect=VerisureOwaError("offline")),
     ):
         await hass.config_entries.async_setup(office.entry_id)
-    hub.refresh_token_is_dead = True
+    hub.refresh_refusals_persisting = True
     written_to = _record_persistence_target(hub)
 
     await hass.config_entries.async_remove(home.entry_id)

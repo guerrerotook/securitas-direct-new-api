@@ -209,8 +209,9 @@ class VerisureHub:
         it propagates so setup maps it to ConfigEntryNotReady and retries,
         instead of forcing a needless reauth on a token-only account. This
         mirrors the transient-vs-genuine split the client and coordinators
-        already use via is_genuine_auth_failure(). A *streak* of those is
-        setup's call: see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD in __init__.
+        already use via is_genuine_auth_failure(). Verisure refusing the token
+        is retried this way however long it lasts; setup tracks how long (see
+        _login_or_raise in __init__).
 
         For an account that still has a stored password, this deliberately means
         a transient refresh failure retries rather than immediately burning a
@@ -541,9 +542,9 @@ class VerisureHub:
         return self.client.refresh_token_value
 
     @property
-    def refresh_token_is_dead(self) -> bool:
-        """True once the client has condemned its stored refresh token."""
-        return self.client.refresh_token_is_dead
+    def refresh_refusals_persisting(self) -> bool:
+        """True once Verisure has kept refusing the client's refresh token."""
+        return self.client.refresh_refusals_persisting
 
     def adopt_refresh_token(self, value: str) -> None:
         """Hand the client the stored refresh token of an entry joining this

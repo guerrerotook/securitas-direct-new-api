@@ -882,11 +882,11 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
 
     The current token is written at once, since it may have rotated past the
     one ``entry`` stored, unless ``entry`` is signed in to another account. A
-    condemned token is not written: it would replace the entry's own token,
-    which setup may still be able to use.
+    token Verisure keeps refusing is not written: it would replace the entry's
+    own token, which setup may still be able to use.
     """
     hub.config_entry = entry
-    if not hub.refresh_token_is_dead:
+    if not hub.refresh_refusals_persisting:
         hub.persist_current_refresh_token()
 
 
@@ -989,7 +989,7 @@ async def _get_or_create_session(
             # one. Try it on the shared client.
             stored_token = config.get(CONF_REFRESH_TOKEN)
             if (
-                client.refresh_token_is_dead
+                client.refresh_refusals_persisting
                 and stored_token
                 and stored_token != client.get_refresh_token()
             ):

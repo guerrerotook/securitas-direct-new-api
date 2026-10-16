@@ -2021,7 +2021,7 @@ class TestSharedSession:
     async def test_attaching_a_reused_hub_keeps_the_entry_token_over_a_dead_one(
         self, hass, mock_hub
     ):
-        mock_hub.refresh_token_is_dead = True
+        mock_hub.refresh_refusals_persisting = True
         mock_hub.get_refresh_token.return_value = "dead-token"
 
         entry, written_to = await self._set_up_on_detached_hub(
@@ -2751,7 +2751,7 @@ class TestSignInIssue:
         hub.config_entry = entry
         hub.client.password = ""
         hub.client.refresh_token_value = "condemned"
-        hub.client._refresh_token_dead = True
+        hub.client._refusals_persisting = True
         hub.client.refresh_token = AsyncMock(side_effect=error_type("rejected"))
         session = _new_session_record(hub)
         session["holders"].add(other.entry_id)
@@ -3786,7 +3786,7 @@ class TestCoTenantStoredTokenRecovery:
         entry.add_to_hass(hass)
         _raise_sign_in_issue(hass, entry.data[CONF_USERNAME])
         self._shared_session(hass, mock_hub, entry)
-        mock_hub.refresh_token_is_dead = True
+        mock_hub.refresh_refusals_persisting = True
         mock_hub.get_refresh_token.return_value = "dead-token"
         assert _sign_in_issues(hass) != {}
 
@@ -3806,7 +3806,7 @@ class TestCoTenantStoredTokenRecovery:
         entry = MockConfigEntry(domain=DOMAIN, data=data)
         entry.add_to_hass(hass)
         self._shared_session(hass, mock_hub, entry)
-        mock_hub.refresh_token_is_dead = True
+        mock_hub.refresh_refusals_persisting = True
         mock_hub.get_refresh_token.return_value = "dead-token"
 
         assert await self._attempt(hass, entry, mock_hub) is True
@@ -3820,7 +3820,7 @@ class TestCoTenantStoredTokenRecovery:
         entry = MockConfigEntry(domain=DOMAIN, data=data)
         entry.add_to_hass(hass)
         self._shared_session(hass, mock_hub, entry)
-        mock_hub.refresh_token_is_dead = False
+        mock_hub.refresh_refusals_persisting = False
         mock_hub.get_refresh_token.return_value = "live-token"
 
         assert await self._attempt(hass, entry, mock_hub) is True
@@ -3836,7 +3836,7 @@ class TestCoTenantStoredTokenRecovery:
         entry = MockConfigEntry(domain=DOMAIN, data=data)
         entry.add_to_hass(hass)
         self._shared_session(hass, mock_hub, entry)
-        mock_hub.refresh_token_is_dead = True
+        mock_hub.refresh_refusals_persisting = True
         mock_hub.get_refresh_token.return_value = "dead-token"
         mock_hub.login = AsyncMock(
             side_effect=VerisureOwaError("boom", http_status=500)

@@ -390,7 +390,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub.get_authentication_token = MagicMock(return_value=FAKE_JWT)
     hub.get_refresh_token = MagicMock(return_value=FAKE_REFRESH_TOKEN)
     # A spec'd property reads as a truthy MagicMock; a live token is the norm.
-    hub.refresh_token_is_dead = False
+    hub.refresh_refusals_persisting = False
     for key, val in overrides.items():
         setattr(hub, key, val)
     return hub

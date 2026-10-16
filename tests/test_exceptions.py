@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from custom_components.securitas.verisure_owa_api import exceptions
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     APIConnectionError,
@@ -13,7 +14,6 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     ImageCaptureError,
     OperationFailedError,
     OperationTimeoutError,
-    RefreshTokenDeadError,
     SessionExpiredError,
     TwoFactorRequiredError,
     UnexpectedStateError,
@@ -399,8 +399,8 @@ class TestIsRefreshTokenRejected:
         err.response_body = {"errors": [], "data": {"xSRefreshLogin": None}}
         assert is_refresh_token_rejected(err) is False
 
-    def test_a_single_rejection_stays_transient(self):
-        """Only a streak escalates, as with the #568 crash."""
+    def test_a_rejection_stays_transient(self):
+        """Refusals are retried, as with the #568 crash."""
         assert is_genuine_auth_failure(refresh_token_rejected_error()) is False
 
 
@@ -408,7 +408,7 @@ class TestIsRefreshTokenRejected:
 
 
 class TestDeadRefreshTokenSignal:
-    """Names the failures that count towards a dead-refresh-token streak."""
+    """Names the failures that count as Verisure refusing the saved sign-in."""
 
     def test_crash_is_named(self):
         assert dead_refresh_token_signal(refresh_login_crash_error()) == (
@@ -454,14 +454,17 @@ def test_error_code_from_body_extracts_and_stringifies():
     assert _error_code_from_body({"errors": [{"message": "x"}]}) is None
 
 
-# ── RefreshTokenDeadError ────────────────────────────────────────────────────
+# ── Refusals never condemn the token ─────────────────────────────────────────
 
 
-class TestRefreshTokenDeadError:
-    """A dead-token streak that has exhausted its retries is a genuine auth failure."""
+class TestRefusalsNeverAskForReauth:
+    """A refusal of the saved sign-in is retried, never turned into reauth."""
 
-    def test_is_an_authentication_error(self):
-        assert issubclass(RefreshTokenDeadError, AuthenticationError)
+    def test_no_dead_token_error_exists(self):
+        assert not hasattr(exceptions, "RefreshTokenDeadError")
 
-    def test_is_genuine(self):
-        assert is_genuine_auth_failure(RefreshTokenDeadError("dead")) is True
+    @pytest.mark.parametrize(
+        "make_err", [refresh_login_crash_error, refresh_token_rejected_error]
+    )
+    def test_refusal_is_not_genuine(self, make_err):
+        assert is_genuine_auth_failure(make_err()) is False

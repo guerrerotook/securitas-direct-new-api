@@ -1,18 +1,24 @@
 """Tests for VerisureOwaClient authentication flow."""
 
+import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from pydantic import BaseModel
 
+from custom_components.securitas.verisure_owa_api.client import (
+    VerisureOwaClient,
+    _base,
+)
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     AuthenticationError,
-    RefreshTokenDeadError,
     SessionExpiredError,
     TwoFactorRequiredError,
     VerisureOwaError,
+    dead_refresh_token_signal,
+    is_genuine_auth_failure,
 )
 
 from .conftest import (
@@ -625,254 +631,366 @@ class TestStreakResetOnSuccess:
         assert api.consecutive_auth_recovery_failures == 0
 
 
-# ── Runtime escalation of the xSRefreshLogin crash to reauth (#568) ─────────
+# ── Verisure refusing the saved sign-in: keep retrying, alert at 15 min ──────
 
 
-class TestRefreshCrashEscalation:
-    """Three consecutive crashes with no successful renewal mean the token is dead.
+class _Clock:
+    """The time the client's ``datetime.now()`` reports, moved by hand."""
 
-    A single crash stays transient (a backend wobble can crash the resolver
-    once). But a token that keeps crashing across polls, with no successful
-    refresh in between, is not coming back: surface it as an AuthenticationError
-    so the coordinators' existing classifier prompts reauth instead of retrying
-    forever with devices unavailable.
-    """
+    def __init__(self) -> None:
+        self.now = datetime(2026, 10, 16, 15, 44)
 
-    def _expire(self, api):
-        api.authentication_token = FAKE_JWT
-        api.authentication_token_exp = datetime.min
-        api.refresh_token_value = "has-refresh-token"
-        api.password = ""  # token-only account, the norm since v5.1.0
-        api.login = AsyncMock()
+    def advance(self, **kwargs: float) -> None:
+        self.now += timedelta(**kwargs)
 
-    @staticmethod
-    def _age_last_crash(api):
-        """Pretend the last counted crash happened a poll cycle ago."""
-        api._last_counted_refresh_crash = datetime.now() - timedelta(minutes=5)
 
-    async def test_crashes_within_one_renewal_window_count_once(self, api):
-        """Several coordinators contending for one expired token each take a
-        turn behind the auth lock, seconds apart, and each sees the crash.
-        That is one renewal window, not a streak: it must not escalate."""
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+@pytest.fixture
+def clock(monkeypatch):
+    fake = _Clock()
 
-        for _ in range(5):
-            with pytest.raises(VerisureOwaError) as exc_info:
-                await api._check_authentication_token()
-            assert not isinstance(exc_info.value, AuthenticationError)
+    class _FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fake.now
 
-        assert api.refresh_token.await_count == 5
+    monkeypatch.setattr(_base, "datetime", _FakeDatetime)
+    return fake
 
-    async def test_dead_token_with_a_password_falls_back_to_login(self, api):
-        """A stored password is the stronger credential: use it, as the
-        genuine-rejection path does, rather than prompting for it."""
-        self._expire(api)
-        api.password = "secret"
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
 
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        await api._check_authentication_token()
+REFUSALS = pytest.mark.parametrize(
+    "make_refusal",
+    [refresh_token_rejected_error, refresh_login_crash_error],
+    ids=["err4", "crash"],
+)
 
-        api.login.assert_awaited_once()
 
-    async def test_two_crashes_stay_transient(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+def _token_only_client(mock_transport, **kwargs) -> VerisureOwaClient:
+    """A token-only client (no password, the norm since v5.1.0) with an
+    expired auth token and a stored refresh token."""
+    client = VerisureOwaClient(
+        transport=mock_transport,
+        country="PT",
+        language="pt",
+        username="test@example.com",
+        password=kwargs.pop("password", ""),
+        device_id="test-device-id",
+        uuid="test-uuid",
+        id_device_indigitall="test-indigitall",
+        refresh_token="has-refresh-token",
+        **kwargs,
+    )
+    client.authentication_token = FAKE_JWT
+    client.authentication_token_exp = datetime.min
+    client.login = AsyncMock()
+    return client
 
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError) as exc_info:
-                await api._check_authentication_token()
-            assert not isinstance(exc_info.value, AuthenticationError)
 
-        api.login.assert_not_called()
+def _succeed(client):
+    """A refresh_token() side effect that renews the way the real one does."""
 
-    async def test_third_consecutive_crash_raises_refresh_token_dead(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+    async def _refresh():
+        client.note_auth_success()
+        return True
 
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        with pytest.raises(RefreshTokenDeadError) as exc_info:
-            await api._check_authentication_token()
+    return _refresh
 
-        # Chained to the server crash so the log still shows the real response.
-        assert isinstance(exc_info.value.__cause__, VerisureOwaError)
-        assert "refresh-login crash" in str(exc_info.value)
-        api.login.assert_not_called()
 
-    async def test_escalating_crash_does_not_log_the_not_forcing_reauth_warning(
-        self, api, caplog
+async def _poll(client) -> Exception | None:
+    """One renewal due on an expired token; returns what it raised."""
+    client.authentication_token_exp = datetime.min
+    try:
+        await client._check_authentication_token()
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        return err
+    return None
+
+
+async def _refuse_until_persisting(client, clock, make_refusal) -> None:
+    """Polls every minute from t=0 to t=15, each refused: persisting at t=15."""
+    client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
+    for minute in range(16):
+        if minute:
+            clock.advance(minutes=1)
+        await _poll(client)
+    assert client.refresh_refusals_persisting
+
+
+def _fresh(make_refusal):
+    """A side effect raising a new refusal on every call."""
+
+    def _refuse():
+        raise make_refusal()
+
+    return _refuse
+
+
+class TestRefusalsKeepRetrying:
+    """A refusal (err 4 or the #568 crash) is never Verisure saying the token is
+    invalid, so the token is never condemned: every refusal is a transient
+    failure the coordinators retry. After 15 minutes of them the host is told
+    once, and renewals slow to one every 5 minutes."""
+
+    @REFUSALS
+    async def test_refusals_never_ask_for_reauth(
+        self, mock_transport, clock, make_refusal
     ):
-        """The transient-streak WARNING says reauth is withheld; on the crash
-        that forces reauth it must not be emitted, or the log contradicts itself."""
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+        client = _token_only_client(mock_transport)
+        client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
+
+        for _ in range(15):
+            err = await _poll(client)
+            assert isinstance(err, VerisureOwaError)
+            assert not isinstance(err, AuthenticationError)
+            assert not is_genuine_auth_failure(err)
+            assert dead_refresh_token_signal(err) is not None
+            clock.advance(minutes=1)
+        assert client.refresh_token.await_count == 15
+
+        for _ in range(120):
+            err = await _poll(client)
+            assert isinstance(err, VerisureOwaError)
+            assert not isinstance(err, AuthenticationError)
+            clock.advance(minutes=1)
+        client.login.assert_not_called()
+
+    @REFUSALS
+    async def test_a_single_refusal_is_not_persisting(
+        self, mock_transport, clock, make_refusal
+    ):
+        client = _token_only_client(mock_transport)
+        client.refresh_token = AsyncMock(side_effect=make_refusal())
+
+        await _poll(client)
+
+        assert client.refresh_refusals_persisting is False
+
+    @REFUSALS
+    async def test_minute_polls_alert_once_at_15_minutes_then_pace(
+        self, mock_transport, clock, make_refusal, caplog
+    ):
+        alerted_at: list[tuple[bool, datetime]] = []
+        client = _token_only_client(
+            mock_transport,
+            on_refresh_refusal_alert=lambda active: alerted_at.append(
+                (active, clock.now)
+            ),
+        )
+        client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
+        client.record_auth_recovery_failure = MagicMock()
+        start = clock.now
+        attempted: list[int] = []
+        paced: list[int] = []
 
         with caplog.at_level("WARNING"):
-            for _ in range(2):
-                with pytest.raises(VerisureOwaError):
-                    await api._check_authentication_token()
-                self._age_last_crash(api)
-            caplog.clear()
-            with pytest.raises(RefreshTokenDeadError):
-                await api._check_authentication_token()
+            for minute in range(61):
+                calls = client.refresh_token.await_count
+                err = await _poll(client)
+                assert isinstance(err, VerisureOwaError)
+                assert not isinstance(err, AuthenticationError)
+                if client.refresh_token.await_count > calls:
+                    attempted.append(minute)
+                else:
+                    paced.append(minute)
+                    assert "still refusing" in str(err)
+                clock.advance(minutes=1)
 
-        assert "NOT forcing reauthentication" not in caplog.text
+        assert attempted == list(range(16)) + list(range(20, 61, 5))
+        assert alerted_at == [(True, start + timedelta(minutes=15))]
+        assert caplog.text.count("refused to renew the saved sign-in") == 1
+        assert client.record_auth_recovery_failure.call_count == len(attempted)
+        client.login.assert_not_called()
 
-    async def test_dead_token_is_latched_without_another_round_trip(self, api):
-        """Once the streak trips, every later renewal attempt on this client
-        raises immediately: the other coordinators sharing the client must not
-        each burn a doomed RefreshLogin against the rate-limited endpoint."""
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+    @pytest.mark.parametrize(
+        "failure",
+        [TimeoutError(), VerisureOwaError("boom", http_status=500)],
+        ids=["timeout", "5xx"],
+    )
+    async def test_any_attempt_while_persisting_restarts_the_five_minutes(
+        self, mock_transport, clock, failure
+    ):
+        client = _token_only_client(mock_transport)
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
 
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        with pytest.raises(RefreshTokenDeadError):
-            await api._check_authentication_token()
-        calls_before = api.refresh_token.await_count
+        clock.advance(minutes=5)  # t=20
+        client.refresh_token = AsyncMock(side_effect=failure)
+        assert isinstance(await _poll(client), VerisureOwaError)
+        assert client.refresh_token.await_count == 1
 
-        with pytest.raises(RefreshTokenDeadError):
-            await api._check_authentication_token()
+        client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        for _ in range(4):  # t=21..24
+            clock.advance(minutes=1)
+            assert "still refusing" in str(await _poll(client))
+        assert client.refresh_token.await_count == 0
+        clock.advance(minutes=1)  # t=25
+        await _poll(client)
+        assert client.refresh_token.await_count == 1
 
-        assert api.refresh_token.await_count == calls_before
-        api.login.assert_not_called()
+    @REFUSALS
+    async def test_success_after_the_alert_clears_it_and_starts_afresh(
+        self, mock_transport, clock, make_refusal
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
+        await _refuse_until_persisting(client, clock, make_refusal)
 
-    async def test_successful_auth_clears_the_latch(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        with pytest.raises(RefreshTokenDeadError):
-            await api._check_authentication_token()
+        clock.advance(minutes=5)
+        client.refresh_token = AsyncMock(side_effect=_succeed(client))
+        assert await _poll(client) is None
 
-        api.note_auth_success()  # e.g. the reauth flow minted a new token
-        api.refresh_token = AsyncMock(return_value=True)
+        assert alerts.call_args_list == [call(True), call(False)]
+        assert client.refresh_refusals_persisting is False
 
-        await api._check_authentication_token()
+        # A new period: no pacing, no alert until 15 minutes of refusals.
+        client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
+        for _ in range(15):
+            clock.advance(minutes=1)
+            await _poll(client)
+        assert client.refresh_token.await_count == 15
+        assert alerts.call_count == 2
 
-        api.refresh_token.assert_awaited_once()
+    async def test_success_without_an_alert_calls_nothing(self, mock_transport, clock):
+        alerts = MagicMock()
+        client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
+        client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        await _poll(client)
 
-    async def test_successful_refresh_resets_the_streak(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(
-            side_effect=[
-                refresh_login_crash_error(),
-                refresh_login_crash_error(),
-                True,
-                refresh_login_crash_error(),
-                refresh_login_crash_error(),
-            ]
+        clock.advance(minutes=1)
+        client.refresh_token = AsyncMock(side_effect=_succeed(client))
+        assert await _poll(client) is None
+
+        alerts.assert_not_called()
+
+    async def test_refusals_and_crashes_share_one_period(self, mock_transport, clock):
+        alerts = MagicMock()
+        client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
+        refusals = [refresh_token_rejected_error, refresh_login_crash_error]
+
+        for minute in range(16):
+            client.refresh_token = AsyncMock(side_effect=refusals[minute % 2]())
+            await _poll(client)
+            clock.advance(minutes=1)
+
+        alerts.assert_called_once_with(True)
+
+    @pytest.mark.parametrize(
+        "failure",
+        [TimeoutError(), VerisureOwaError("boom", http_status=500)],
+        ids=["timeout", "5xx"],
+    )
+    async def test_other_failures_neither_start_nor_reset_the_period(
+        self, mock_transport, clock, failure
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
+
+        # Other failures alone never start one.
+        client.refresh_token = AsyncMock(side_effect=failure)
+        for _ in range(30):
+            await _poll(client)
+            clock.advance(minutes=1)
+        alerts.assert_not_called()
+        assert client.refresh_refusals_persisting is False
+
+        # Refusal, other failures, refusal 15 minutes later: still one period.
+        client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        await _poll(client)
+        client.refresh_token = AsyncMock(side_effect=failure)
+        for _ in range(14):
+            clock.advance(minutes=1)
+            await _poll(client)
+        clock.advance(minutes=1)
+        client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        await _poll(client)
+
+        alerts.assert_called_once_with(True)
+
+    @REFUSALS
+    async def test_a_stored_password_is_used_once_persisting(
+        self, mock_transport, clock, make_refusal
+    ):
+        """A stored password is the stronger credential: once refusals persist,
+        use it rather than keep presenting the refused token."""
+        client = _token_only_client(mock_transport, password="secret")
+        client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
+
+        for _ in range(15):
+            assert isinstance(await _poll(client), VerisureOwaError)
+            clock.advance(minutes=1)
+        client.login.assert_not_called()
+
+        assert await _poll(client) is None  # t=15: persisting
+        client.login.assert_awaited_once()
+
+        clock.advance(minutes=1)
+        calls = client.refresh_token.await_count
+        assert await _poll(client) is None
+        assert client.refresh_token.await_count == calls
+        assert client.login.await_count == 2
+
+    @REFUSALS
+    async def test_adopting_a_token_retries_at_once_and_keeps_the_alert(
+        self, mock_transport, clock, make_refusal
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
+        await _refuse_until_persisting(client, clock, make_refusal)
+
+        clock.advance(minutes=1)
+        client.adopt_refresh_token("co-tenant-token")
+        assert client.refresh_refusals_persisting is False
+        calls = client.refresh_token.await_count
+        await _poll(client)
+        assert client.refresh_token.await_count == calls + 1
+        clock.advance(minutes=1)
+        await _poll(client)
+        assert client.refresh_token.await_count == calls + 2
+        alerts.assert_called_once_with(True)
+
+        clock.advance(minutes=1)
+        client.refresh_token = AsyncMock(side_effect=_succeed(client))
+        assert await _poll(client) is None
+        assert alerts.call_args_list == [call(True), call(False)]
+
+    async def test_a_raising_callback_does_not_break_renewal(
+        self, mock_transport, clock, caplog
+    ):
+        client = _token_only_client(
+            mock_transport, on_refresh_refusal_alert=MagicMock(side_effect=OSError)
         )
+        with caplog.at_level("WARNING"):
+            await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
 
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        await api._check_authentication_token()
-        api.note_auth_success()  # the real refresh_token() does this on success
-        api.authentication_token_exp = datetime.min
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError) as exc_info:
-                await api._check_authentication_token()
-            assert not isinstance(exc_info.value, AuthenticationError)
-            self._age_last_crash(api)
+            clock.advance(minutes=5)
+            client.refresh_token = AsyncMock(side_effect=_succeed(client))
+            assert await _poll(client) is None
 
-    async def test_other_transient_failures_never_escalate(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(
-            side_effect=VerisureOwaError("boom", http_status=500)
+        assert caplog.text.count("on_refresh_refusal_alert callback raised") == 2
+
+    async def test_concurrent_renewals_while_paced_share_one_attempt(
+        self, mock_transport, clock
+    ):
+        client = _token_only_client(mock_transport)
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
+        calls = client.refresh_token.await_count
+
+        clock.advance(minutes=1)
+        client.authentication_token_exp = datetime.min
+        results = await asyncio.gather(
+            client._check_authentication_token(),
+            client._check_authentication_token(),
+            return_exceptions=True,
         )
+        assert all("still refusing" in str(r) for r in results)
+        assert client.refresh_token.await_count == calls
 
-        for _ in range(5):
-            with pytest.raises(VerisureOwaError) as exc_info:
-                await api._check_authentication_token()
-            assert not isinstance(exc_info.value, AuthenticationError)
-
-    async def test_non_crash_failure_does_not_reset_the_streak(self, api):
-        """Crash, timeout, crash, crash: still no successful renewal."""
-        self._expire(api)
-        api.refresh_token = AsyncMock(
-            side_effect=[
-                refresh_login_crash_error(),
-                TimeoutError(),
-                refresh_login_crash_error(),
-                refresh_login_crash_error(),
-            ]
+        clock.advance(minutes=4)  # the window's end
+        results = await asyncio.gather(
+            client._check_authentication_token(),
+            client._check_authentication_token(),
+            return_exceptions=True,
         )
-
-        for _ in range(3):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        with pytest.raises(RefreshTokenDeadError):
-            await api._check_authentication_token()
-
-
-# ── Runtime escalation of the err 4 token rejection to reauth ────────────────
-
-
-class TestRefreshTokenRejectedEscalation:
-    """Verisure refusing the stored token with err 4 / 404 escalates like the
-    #568 crash: one refusal is transient, a streak means the token is dead."""
-
-    _expire = TestRefreshCrashEscalation._expire
-    _age_last_crash = staticmethod(TestRefreshCrashEscalation._age_last_crash)
-
-    async def test_two_rejections_stay_transient(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
-
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError) as exc_info:
-                await api._check_authentication_token()
-            assert not isinstance(exc_info.value, AuthenticationError)
-            self._age_last_crash(api)
-
-        api.login.assert_not_called()
-
-    async def test_third_consecutive_rejection_raises_refresh_token_dead(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
-
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        with pytest.raises(RefreshTokenDeadError) as exc_info:
-            await api._check_authentication_token()
-
-        assert isinstance(exc_info.value.__cause__, VerisureOwaError)
-        assert "refresh-token rejection (err 4)" in str(exc_info.value)
-        assert "crash" not in str(exc_info.value)
-        api.login.assert_not_called()
-
-    async def test_rejections_and_crashes_share_one_streak(self, api):
-        self._expire(api)
-        api.refresh_token = AsyncMock(
-            side_effect=[
-                refresh_token_rejected_error(),
-                refresh_login_crash_error(),
-                refresh_token_rejected_error(),
-            ]
-        )
-
-        for _ in range(2):
-            with pytest.raises(VerisureOwaError):
-                await api._check_authentication_token()
-            self._age_last_crash(api)
-        with pytest.raises(RefreshTokenDeadError):
-            await api._check_authentication_token()
+        assert all(isinstance(r, VerisureOwaError) for r in results)
+        assert client.refresh_token.await_count == calls + 1
 
 
 # ── Auth mutations opt out of the transport's blind 403 retry ──────────────

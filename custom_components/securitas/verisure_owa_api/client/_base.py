@@ -25,7 +25,6 @@ from ..exceptions import (
     _ACCOUNT_BLOCKED_ERROR_CODE,
     APIConnectionError,
     OperationTimeoutError,
-    RefreshTokenDeadError,
     SessionExpiredError,
     VerisureOwaError,
     _error_code_from_body,
@@ -95,15 +94,12 @@ ALARM_STATUS_SERVICE_ID = "11"
 # UpdateFailed repeat-suppression.
 _AUTH_ESCALATION_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
-# Counted xSRefreshLogin crashes or err 4 rejections (dead_refresh_token_signal),
-# with no successful renewal in between, after which the stored refresh token
-# is treated as dead and reauth is requested (#568). One can be a server
-# wobble; a token that keeps failing this way across polls has never been seen
-# to recover. Failures closer together than the spacing are one renewal window
-# (the coordinators sharing this client each take a turn behind the auth lock
-# seconds apart) and count once.
-_REFRESH_CRASH_REAUTH_THRESHOLD = 3
-_REFRESH_CRASH_MIN_SPACING = timedelta(seconds=60)
+# Verisure refusing the saved sign-in (dead_refresh_token_signal) is never
+# proof the token is invalid, so it is retried for as long as it lasts. Once a
+# refusal arrives this long after the first one with no successful renewal in
+# between, the host is alerted and renewals slow to one per REFRESH_REFUSAL_RETRY_EVERY.
+REFRESH_REFUSAL_ALERT_AFTER = timedelta(minutes=15)
+REFRESH_REFUSAL_RETRY_EVERY = timedelta(minutes=5)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
 # The open issue tracking the xSRefreshLogin server crash; the recruitment
 # WARNING points affected users straight at it.
@@ -143,6 +139,7 @@ class _ClientBase:
         log_filter: Any | None = None,
         refresh_token: str | None = None,
         on_refresh_token_changed: Callable[[str], None] | None = None,
+        on_refresh_refusal_alert: Callable[[bool], None] | None = None,
     ) -> None:
         # Transport
         self._transport = transport
@@ -183,16 +180,19 @@ class _ClientBase:
         # crash re-presents the same token every poll, and repeating the recruit
         # line on each retry would become the log spam it avoids.
         self._refresh_crash_reported: bool = False
-        # Consecutive dead-token signals (xSRefreshLogin crash or err 4
-        # rejection) on the current refresh token; reset only by a successful
-        # renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
-        self._refresh_crash_streak: int = 0
-        self._last_counted_refresh_crash: datetime | None = None
-        # Latched once the streak trips: the client is shared by every
-        # coordinator (and user command) on the account, and each would
-        # otherwise spend a doomed RefreshLogin round-trip against the
-        # rate-limited endpoint before hitting the same conclusion.
-        self._refresh_token_dead: bool = False
+        # Refusal period: see REFRESH_REFUSAL_ALERT_AFTER. Only a successful
+        # renewal (or adopting another token) ends it; other failures don't.
+        self._refresh_refused_since: datetime | None = None
+        self._refusals_persisting: bool = False
+        # Pacing is per client, not per coordinator: every coordinator and user
+        # command on the account shares this client and its one refresh token.
+        self._last_renewal_attempt: datetime | None = None
+        # Outlives adopt_refresh_token so the host alert is cleared only by a
+        # renewal that actually succeeds.
+        self._refusal_alert_raised: bool = False
+        self._on_refresh_refusal_alert: Callable[[bool], None] | None = (
+            on_refresh_refusal_alert
+        )
 
         # Device configuration
         self.device_id: str = device_id
@@ -524,7 +524,11 @@ class _ClientBase:
             # already minted a fresh token while we were waiting.
             if not self._token_needs_renewal():
                 return
-            if self.refresh_token_value and not self._refresh_token_dead:
+            if self.refresh_token_value and not (
+                self._refusals_persisting and self.password
+            ):
+                self._pace_refused_renewal()
+                self._last_renewal_attempt = datetime.now()
                 _LOGGER.debug("[auth] Auth token expired, refreshing")
                 try:
                     # pylint: disable=no-member  # provided by _AuthMixin
@@ -540,91 +544,106 @@ class _ClientBase:
                     # Genuine token rejection (e.g. err 60067): the refresh
                     # token is dead -> fall through to login() so a missing
                     # password surfaces as a clean reauth signal. Anything else
-                    # (5xx, a timeout, or a single xSRefreshLogin crash or err
-                    # 4 refusal) may be a passing fault: don't spend a login;
-                    # record it and propagate so the coordinator retries.
-                    # _note_refresh_crash counts the crash and the err 4
-                    # refusal towards the dead-token streak; once it trips the
-                    # token is treated as dead (RefreshTokenDeadError, or
-                    # login() when a password is stored).
+                    # (5xx, a timeout, or Verisure refusing the token) may be a
+                    # passing fault: don't spend a login; record it and
+                    # propagate so the coordinator retries. A stored password is
+                    # spent only once refusals persist.
                     if is_genuine_auth_failure(owa_err):
                         _LOGGER.warning(
                             "Refresh token genuinely rejected, falling back to "
                             "login: %s",
                             err,
                         )
-                    elif not self._note_refresh_crash(owa_err):
-                        self.record_auth_recovery_failure(owa_err)
-                        if isinstance(err, VerisureOwaError):
-                            raise
-                        raise owa_err from err
-                    elif not self.password:
-                        # Not recorded as a transient failure: that WARNING says
-                        # reauth is being withheld, which this raise contradicts.
-                        raise RefreshTokenDeadError(
-                            "Stored refresh token failed "
-                            f"{self._refresh_crash_streak} renewals in a row "
-                            f"(last: {dead_refresh_token_signal(owa_err)}); "
-                            "re-authentication required"
-                        ) from err
                     else:
+                        signal = dead_refresh_token_signal(owa_err)
+                        if signal is not None:
+                            self._note_refresh_refusal(signal)
+                        if not (
+                            signal is not None
+                            and self._refusals_persisting
+                            and self.password
+                        ):
+                            self.record_auth_recovery_failure(owa_err)
+                            if isinstance(err, VerisureOwaError):
+                                raise
+                            raise owa_err from err
                         _LOGGER.warning(
-                            "Refresh token found dead after %d failed "
-                            "renewals, falling back to login",
-                            self._refresh_crash_streak,
+                            "Verisure keeps refusing the refresh token, "
+                            "falling back to login"
                         )
-            elif self._refresh_token_dead and not self.password:
-                raise RefreshTokenDeadError(
-                    "Stored refresh token already found dead; "
-                    "re-authentication required"
-                )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
             # pylint: disable=no-member  # provided by _AuthMixin
             await self.login()  # type: ignore[attr-defined]
 
-    def _note_refresh_crash(self, err: VerisureOwaError) -> bool:
-        """Count a dead-token signal; True once the stored token is dead.
+    def _pace_refused_renewal(self) -> None:
+        """Raise without contacting Verisure while persisting refusals are paced.
 
-        Only a ``dead_refresh_token_signal`` counts, other transient failures
-        neither count nor reset (a successful renewal does, via
-        note_auth_success). Signals within ``_REFRESH_CRASH_MIN_SPACING`` of
-        the last counted one are the same renewal window and count once.
-        Reaching ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches
-        ``refresh_token_is_dead`` so every later renewal on this shared client
-        concludes the same without another round-trip.
+        Not recorded as a recovery failure: no attempt was made.
         """
-        if self._refresh_token_dead:
-            return True
-        if dead_refresh_token_signal(err) is None:
-            return False
+        last = self._last_renewal_attempt
+        if not self._refusals_persisting or last is None:
+            return
+        next_try = last + REFRESH_REFUSAL_RETRY_EVERY
+        if datetime.now() < next_try:
+            raise VerisureOwaError(
+                "Verisure is still refusing the saved sign-in; next try after "
+                f"{next_try:%H:%M:%S}"
+            )
+
+    def _note_refresh_refusal(self, signal: str) -> None:
+        """Track a refusal; alert once when the period has lasted long enough.
+
+        Judged at the refusal itself, so a quiet spell with no renewal due
+        never turns into an alert on its own.
+        """
         now = datetime.now()
-        last = self._last_counted_refresh_crash
-        if last is not None and now - last < _REFRESH_CRASH_MIN_SPACING:
-            return False
-        self._last_counted_refresh_crash = now
-        self._refresh_crash_streak += 1
-        if self._refresh_crash_streak < _REFRESH_CRASH_REAUTH_THRESHOLD:
-            return False
-        self._refresh_token_dead = True
-        return True
+        since = self._refresh_refused_since
+        if since is None:
+            self._refresh_refused_since = now
+            return
+        if self._refusals_persisting or now - since < REFRESH_REFUSAL_ALERT_AFTER:
+            return
+        self._refusals_persisting = True
+        self._refusal_alert_raised = True
+        _LOGGER.warning(
+            "Verisure has refused to renew the saved sign-in for %d minutes "
+            "(last: %s). The integration keeps trying every few minutes; if it "
+            "doesn't recover, sign in again from the integration's menu: "
+            "Reconfigure.",
+            int((now - since).total_seconds() // 60),
+            signal,
+        )
+        self._notify_refusal_alert(True)
+
+    def _notify_refusal_alert(self, active: bool) -> None:
+        """Tell the host; a failing host callback must not break auth."""
+        if self._on_refresh_refusal_alert is None:
+            return
+        try:
+            self._on_refresh_refusal_alert(active)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning("on_refresh_refusal_alert callback raised", exc_info=True)
+
+    def _reset_refusal_period(self) -> None:
+        self._refresh_refused_since = None
+        self._refusals_persisting = False
+        self._last_renewal_attempt = None
 
     @property
-    def refresh_token_is_dead(self) -> bool:
-        """True once a dead-token streak has condemned the stored refresh token."""
-        return self._refresh_token_dead
+    def refresh_refusals_persisting(self) -> bool:
+        """True once Verisure has refused renewals for REFRESH_REFUSAL_ALERT_AFTER."""
+        return self._refusals_persisting
 
     def adopt_refresh_token(self, value: str) -> None:
         """Replace the refresh token with the stored one of an entry joining
         this shared session.
 
-        Clears the dead-token verdict so the next renewal actually tries it.
-        The token is not persisted here: that entry already stores it.
+        Ends the refusal period so the next renewal tries it at once. The
+        token is not persisted here: that entry already stores it.
         """
         self.refresh_token_value = value
         self._register_secret("refresh_token", value)
-        self._refresh_crash_streak = 0
-        self._last_counted_refresh_crash = None
-        self._refresh_token_dead = False
+        self._reset_refusal_period()
 
     def note_auth_success(self) -> None:
         """Reset the auth-recovery streak after a successful authentication."""
@@ -637,9 +656,10 @@ class _ClientBase:
         self._auth_streak_started = None
         self._last_auth_escalation = None
         self._last_auth_failure = None
-        self._refresh_crash_streak = 0
-        self._last_counted_refresh_crash = None
-        self._refresh_token_dead = False
+        self._reset_refusal_period()
+        if self._refusal_alert_raised:
+            self._refusal_alert_raised = False
+            self._notify_refusal_alert(False)
 
     def record_auth_recovery_failure(self, err: VerisureOwaError) -> None:
         """Record a transient auth-recovery failure and log it.
@@ -713,9 +733,9 @@ class _ClientBase:
         self._refresh_crash_reported = True
         _LOGGER.warning(
             "Verisure rejected the stored refresh token with the known "
-            "refresh-login server crash (issue #568): %s. The integration retries "
-            "briefly and, if it persists, asks you to re-authenticate — enter "
-            "your password once and a fresh token is issued. If you can help pin "
+            "refresh-login server crash (issue #568): %s. The integration keeps "
+            "retrying; if it lasts 15 minutes, a notice in Settings → Repairs "
+            "explains how to sign in again with Reconfigure. If you can help pin "
             "down how the token went stale: enable debug logging for "
             "'custom_components.securitas' (a logs: entry under logger: in "
             "configuration.yaml), restart Home Assistant, let it run ~30 minutes, "
