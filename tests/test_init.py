@@ -54,6 +54,7 @@ from custom_components.securitas import (
     PLATFORMS,
     VerisureDevice,
     VerisureHub,
+    _account_lock,
     _attach_token_persistence,
     _build_config_dict,
     _cached_installations,
@@ -2081,6 +2082,29 @@ class TestSharedSession:
         """Concurrent async_setup_entry calls should share one hub, not create two."""
         import asyncio
 
+        # The first login waits until released, so the second setup runs while
+        # it is in flight; only the account lock keeps it from signing in too.
+        login_started, release_login = asyncio.Event(), asyncio.Event()
+
+        async def _blocking_login(*_args, **_kwargs):
+            login_started.set()
+            await release_login.wait()
+
+        mock_hub.login.side_effect = _blocking_login
+
+        # Whether the account's lock was already held each time it was asked
+        # for; ``async with`` acquires it straight after, so a held lock means
+        # that caller waits.
+        lock_was_held: list[bool] = []
+        second_lock_request = asyncio.Event()
+
+        def _watched_account_lock(hass_, username):
+            lock = _account_lock(hass_, username)
+            lock_was_held.append(lock.locked())
+            if len(lock_was_held) == 2:
+                second_lock_request.set()
+            return lock
+
         data1 = make_config_entry_data()
         data1[CONF_INSTALLATION] = "111"
         entry1 = MockConfigEntry(domain=DOMAIN, data=data1)
@@ -2099,16 +2123,35 @@ class TestSharedSession:
                 "async_forward_entry_setups",
                 new_callable=AsyncMock,
             ),
+            patch(
+                "custom_components.securitas._account_lock",
+                side_effect=_watched_account_lock,
+            ),
         ):
             # Run both setup calls concurrently, simulating HA restart
-            results = await asyncio.gather(
+            setups = asyncio.gather(
                 async_setup_entry(hass, entry1),
                 async_setup_entry(hass, entry2),
+                return_exceptions=True,
             )
+            try:
+                await asyncio.wait_for(login_started.wait(), 2)
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(second_lock_request.wait(), 2)
+                assert second_lock_request.is_set(), (
+                    "the second setup never asked for the account lock; "
+                    f"logins so far: {mock_hub.login.await_count}"
+                )
+                assert lock_was_held == [False, True]
+                assert mock_hub.login.await_count == 1
+            finally:
+                release_login.set()
+                results = await asyncio.wait_for(setups, 5)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
 
         assert results == [True, True]
-        # Login should only be called once — the setup lock prevents the
-        # second entry from creating its own hub before the first finishes.
         mock_hub.login.assert_awaited_once()
         username = data1[CONF_USERNAME]
         sessions = hass.data[DOMAIN]["sessions"]
