@@ -68,7 +68,11 @@ from custom_components.securitas.const import (
     CONF_REFRESH_TOKEN,
     PANEL_OPTION_KEYS,
 )
-from custom_components.securitas.hub import VerisureHub
+from custom_components.securitas.hub import (
+    VerisureHub,
+    _renewal_refused_issue_id,
+    raise_renewal_refused_issue,
+)
 from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
     PERI_DEFAULTS,
@@ -2437,13 +2441,13 @@ async def test_closing_one_flow_keeps_the_session_another_flow_borrowed(hass):
 async def test_closing_a_flow_during_an_entrys_token_recovery_keeps_the_session(
     hass,
 ):
-    """An entry reusing the flow's session may sign in again first (a dead
-    refresh token); closing the flow meanwhile must not unregister the session
-    the entry is about to hold."""
+    """An entry reusing the flow's session may sign in again first (a refresh
+    token Verisure keeps refusing); closing the flow meanwhile must not
+    unregister the session the entry is about to hold."""
     hub = _hub_factory()
     hub.config = make_config_entry_data()
     flow = await _start_user_flow(hass, hub)
-    hub.refresh_token_is_dead = True
+    hub.refresh_refusals_persisting = True
     hub.get_refresh_token.return_value = "dead-token"
     data = make_config_entry_data()
     data[CONF_REFRESH_TOKEN] = "fresh-token"
@@ -2692,8 +2696,27 @@ def _add_other_account_entry(hass):
     return entry
 
 
-def _crash_streaks(hass) -> dict:
-    return hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {})
+def _refusals(hass) -> dict:
+    return hass.data.get(DOMAIN, {}).get("refresh_refusals", {})
+
+
+def _refusing_since(hass, username):
+    return _refusals(hass)[username]["since"]
+
+
+def _backdate_refusals(hass, username, minutes=20):
+    """Move the start of the account's refusals back, past the 15 minutes
+    after which the next refusal raises the renewal-refused notice."""
+    _refusals(hass)[username]["since"] -= timedelta(minutes=minutes)
+    return _refusing_since(hass, username)
+
+
+def _renewal_refused_issue_ids(hass) -> list[str]:
+    return [
+        issue_id
+        for domain, issue_id in ir.async_get(hass).issues
+        if domain == DOMAIN and issue_id.startswith("renewal_refused_")
+    ]
 
 
 def _other_account_hub_signing_in_slowly():
@@ -2716,8 +2739,8 @@ def _other_account_hub_signing_in_slowly():
 async def _other_account_retrying_after_a_refresh_crash(hass):
     """Set another account's entry up to fail before taking any hold.
 
-    Its stored token crashes xSRefreshLogin once, so it waits to retry with a
-    crash count of one towards asking for re-authentication.
+    Its stored token crashes xSRefreshLogin once, so it waits to retry, with
+    the account's refusals tracked from that crash.
     """
     other = _add_other_account_entry(hass)
     other_hub = _hub_factory()
@@ -2742,7 +2765,7 @@ async def test_deleting_an_entry_whose_token_recovery_failed_releases_it(hass):
     hub = _hub_factory()
     hub.config = make_config_entry_data()
     flow = await _start_user_flow(hass, hub)
-    hub.refresh_token_is_dead = True
+    hub.refresh_refusals_persisting = True
     hub.get_refresh_token.return_value = "dead-token"
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2955,9 +2978,10 @@ async def test_removing_the_token_owner_skips_a_co_tenant_moved_to_another_accou
     assert written_to == [cabin]
 
 
-async def test_a_dead_token_is_not_handed_to_the_co_tenant(hass):
-    """A condemned token is not written to the co-tenant: it would replace the
-    co-tenant's own token, which setup may still be able to use."""
+async def test_a_refused_token_is_not_handed_to_the_co_tenant(hass):
+    """A token Verisure keeps refusing is not written to the co-tenant: it
+    would replace the co-tenant's own token, which setup may still be able to
+    use."""
     hub = _two_installation_hub()
     home = await _load_home_entry(hass, hub)
     office = _add_office_entry(hass)
@@ -2966,7 +2990,7 @@ async def test_a_dead_token_is_not_handed_to_the_co_tenant(hass):
         AsyncMock(side_effect=VerisureOwaError("offline")),
     ):
         await hass.config_entries.async_setup(office.entry_id)
-    hub.refresh_token_is_dead = True
+    hub.refresh_refusals_persisting = True
     written_to = _record_persistence_target(hub)
 
     await hass.config_entries.async_remove(home.entry_id)
@@ -3131,8 +3155,9 @@ async def test_closing_a_flow_keeps_the_integration_for_an_entry_waiting_to_retr
 ):
     """An entry that failed before taking a hold holds nothing while it waits
     to retry; a flow for another account closing must not tear down the
-    integration under it or forget its crash count."""
+    integration under it or forget when Verisure started refusing its token."""
     other = await _other_account_retrying_after_a_refresh_crash(hass)
+    since = _refusing_since(hass, "other@example.com")
     flow = await _start_user_flow(hass, _hub_factory())
 
     hass.config_entries.flow.async_abort(flow["flow_id"])
@@ -3140,13 +3165,14 @@ async def test_closing_a_flow_keeps_the_integration_for_an_entry_waiting_to_retr
 
     assert other.state is ConfigEntryState.SETUP_RETRY
     assert _alias_services(hass)
-    assert _crash_streaks(hass) == {"other@example.com": 1}
+    assert _refusals(hass) == {"other@example.com": {"since": since, "alerted": False}}
 
 
 async def test_deleting_an_entry_keeps_the_integration_for_one_waiting_to_retry(
     hass,
 ):
     other = await _other_account_retrying_after_a_refresh_crash(hass)
+    since = _refusing_since(hass, "other@example.com")
     home = await _load_home_entry(hass, _two_installation_hub())
 
     await hass.config_entries.async_remove(home.entry_id)
@@ -3154,7 +3180,7 @@ async def test_deleting_an_entry_keeps_the_integration_for_one_waiting_to_retry(
 
     assert other.state is ConfigEntryState.SETUP_RETRY
     assert _alias_services(hass)
-    assert _crash_streaks(hass) == {"other@example.com": 1}
+    assert _refusals(hass) == {"other@example.com": {"since": since, "alerted": False}}
 
 
 async def test_deleting_the_last_entry_waiting_to_retry_tears_down(hass):
@@ -3361,10 +3387,14 @@ async def test_disabling_a_retrying_entry_releases_its_hold_on_the_session(hass)
     _assert_torn_down(hass)
 
 
-async def test_reloading_the_only_entry_waiting_to_retry_keeps_its_crash_count(hass):
+async def test_reloading_the_only_entry_waiting_to_retry_keeps_its_refusal_tracking(
+    hass,
+):
     """HA passes the entry through NOT_LOADED on its way to setting it up again;
-    the clean-up must not run in between."""
+    the clean-up must not run in between. The reload's refusal then counts from
+    the first one, so, 20 minutes on, it raises the notice and still retries."""
     other = await _other_account_retrying_after_a_refresh_crash(hass)
+    since = _backdate_refusals(hass, "other@example.com")
     domain_data = hass.data[DOMAIN]
     other_hub = _hub_factory()
     other_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
@@ -3379,7 +3409,11 @@ async def test_reloading_the_only_entry_waiting_to_retry_keeps_its_crash_count(h
         await hass.async_block_till_done()
 
     assert hass.data[DOMAIN] is domain_data
-    assert _crash_streaks(hass) == {"other@example.com": 2}
+    assert other.state is ConfigEntryState.SETUP_RETRY
+    assert _refusals(hass) == {"other@example.com": {"since": since, "alerted": True}}
+    assert _renewal_refused_issue_ids(hass) == [
+        _renewal_refused_issue_id("other@example.com")
+    ]
 
 
 async def test_reloading_an_entry_waiting_to_retry_keeps_its_session(hass):
@@ -4262,8 +4296,8 @@ def _crashing_login(hub):
 async def _home_crashed_once_then_rejected(hass):
     """Set Home up so its stored token crashes once, then is rejected.
 
-    It is left waiting in the reauth dialog with a crash count of one on
-    its first account, below the two that ask for re-authentication.
+    It is left waiting in the reauth dialog, with its first account's
+    refusals tracked from that crash.
     """
     home = MockConfigEntry(
         domain=DOMAIN,
@@ -4282,7 +4316,7 @@ async def _home_crashed_once_then_rejected(hass):
         await hass.config_entries.async_reload(home.entry_id)
         await hass.async_block_till_done()
     assert home.state is ConfigEntryState.SETUP_ERROR
-    assert _crash_streaks(hass) == {"test@example.com": 1}
+    assert set(_refusals(hass)) == {"test@example.com"}
     return home
 
 
@@ -4295,14 +4329,18 @@ def _reauth_flows_for(hass, entry) -> list:
     ]
 
 
-async def test_a_new_entry_on_the_first_account_gets_its_retry_after_a_switch(hass):
-    """The crash count Home leaves on its first account when it moves to
-    another is still there, but a new entry for that account starts from a
-    live sign-in in its setup dialog, which clears it: the new entry's first
-    crash later waits to retry instead of asking for the password."""
+async def test_a_new_entry_on_the_first_account_tracks_refusals_afresh_after_a_switch(
+    hass,
+):
+    """The refusals Home leaves tracked on its first account when it moves to
+    another are still there, but a new entry for that account starts from a
+    live sign-in in its setup dialog, which forgets them: the new entry's
+    first refusal later starts its own tracking rather than raising the
+    notice for refusals of the old token."""
     home = await _home_crashed_once_then_rejected(hass)
+    since = _backdate_refusals(hass, "test@example.com")
     await _reauth_as_other_account(hass, home)
-    assert _crash_streaks(hass) == {"test@example.com": 1}
+    assert _refusals(hass) == {"test@example.com": {"since": since, "alerted": False}}
 
     office = (
         await _finish_from_options(
@@ -4310,7 +4348,7 @@ async def test_a_new_entry_on_the_first_account_gets_its_retry_after_a_switch(ha
         )
     )["result"]
     assert office.state is ConfigEntryState.LOADED
-    assert _crash_streaks(hass) == {}
+    assert _refusals(hass) == {}
 
     with _crashing_login(_hub_factory()):
         await hass.config_entries.async_reload(office.entry_id)
@@ -4318,17 +4356,21 @@ async def test_a_new_entry_on_the_first_account_gets_its_retry_after_a_switch(ha
 
     assert office.state is ConfigEntryState.SETUP_RETRY
     assert not _reauth_flows_for(hass, office)
+    assert _refusing_since(hass, "test@example.com") > since
+    assert _renewal_refused_issue_ids(hass) == []
 
 
 @pytest.mark.parametrize("home_switches_account", [True, False])
-async def test_a_switch_does_not_change_what_a_crash_on_the_first_account_costs(
+async def test_a_switch_does_not_change_the_first_accounts_refusal_tracking(
     hass, home_switches_account
 ):
-    """Entries on one account share its crash count, so Office's first crash
-    on the account Home crashed on counts as the second. Home moving to
-    another account in between must leave that exactly as it would be had Home
-    stayed: the switch adds nothing."""
+    """Entries on one account share its refusal tracking, so Office's first
+    refusal on the account Home was refused on, 20 minutes later, raises the
+    notice, and Office still waits to retry. Home moving to another account in
+    between must leave that exactly as it would be had Home stayed: the
+    switch changes nothing."""
     home = await _home_crashed_once_then_rejected(hass)
+    since = _backdate_refusals(hass, "test@example.com")
     office = _add_office_entry(hass)
     if home_switches_account:
         await _reauth_as_other_account(hass, home)
@@ -4337,8 +4379,12 @@ async def test_a_switch_does_not_change_what_a_crash_on_the_first_account_costs(
         assert not await hass.config_entries.async_setup(office.entry_id)
     await hass.async_block_till_done()
 
-    assert office.state is ConfigEntryState.SETUP_ERROR
-    assert _crash_streaks(hass) == {"test@example.com": 2}
+    assert office.state is ConfigEntryState.SETUP_RETRY
+    assert not _reauth_flows_for(hass, office)
+    assert _refusals(hass) == {"test@example.com": {"since": since, "alerted": True}}
+    assert _renewal_refused_issue_ids(hass) == [
+        _renewal_refused_issue_id("test@example.com")
+    ]
 
 
 async def _load_third_account_entry(hass):
@@ -4519,12 +4565,14 @@ async def _crash_on_the_next_setup(hass, entry):
         await hass.async_block_till_done()
 
 
-async def test_a_reauth_on_the_same_account_gives_the_next_crash_its_retry(hass):
-    """Signing in again proves the new token, so the crashes of the old one
-    must not count against it: its first crash waits to retry."""
+async def test_a_reauth_on_the_same_account_forgets_the_old_tokens_refusals(hass):
+    """Signing in again proves the new token, so the refusals of the old one
+    must not count against it: its first refusal starts its own tracking and
+    raises no notice."""
     home = await _home_crashed_once_then_rejected(hass)
+    since = _backdate_refusals(hass, "test@example.com")
 
-    with _seen_as_the_reload_starts(hass, lambda: dict(_crash_streaks(hass))) as seen:
+    with _seen_as_the_reload_starts(hass, lambda: dict(_refusals(hass))) as seen:
         result = await _submit_reauth(
             hass,
             home,
@@ -4539,22 +4587,25 @@ async def test_a_reauth_on_the_same_account_gives_the_next_crash_its_retry(hass)
     await _crash_on_the_next_setup(hass, home)
     assert home.state is ConfigEntryState.SETUP_RETRY
     assert not _reauth_flows_for(hass, home)
+    assert _refusing_since(hass, "test@example.com") > since
+    assert _renewal_refused_issue_ids(hass) == []
 
 
-async def test_a_reauth_onto_another_account_clears_that_accounts_crash_count(
+async def test_a_reauth_onto_another_account_forgets_that_accounts_refusals(
     hass,
 ):
-    """The account signed in to has a crash count from another of its
-    entries; the successful sign-in proves its token, so Home's first crash
-    on it waits to retry."""
+    """The account signed in to has refusals tracked from another of its
+    entries; the successful sign-in proves its token, so Home's first refusal
+    on it starts its own tracking and raises no notice."""
     await _load_third_account_entry(hass)
     other = await _other_account_retrying_after_a_refresh_crash(hass)
+    since = _backdate_refusals(hass, "other@example.com")
     home = await _load_home_entry(hass, _two_installation_hub())
-    assert _crash_streaks(hass) == {"other@example.com": 1}
+    assert set(_refusals(hass)) == {"other@example.com"}
     home.async_start_reauth(hass)
     await hass.async_block_till_done()
 
-    with _seen_as_the_reload_starts(hass, lambda: dict(_crash_streaks(hass))) as seen:
+    with _seen_as_the_reload_starts(hass, lambda: dict(_refusals(hass))) as seen:
         result = await _submit_reauth(
             hass,
             home,
@@ -4574,6 +4625,8 @@ async def test_a_reauth_onto_another_account_clears_that_accounts_crash_count(
     assert await hass.config_entries.async_unload(other.entry_id)
     await _crash_on_the_next_setup(hass, home)
     assert home.state is ConfigEntryState.SETUP_RETRY
+    assert _refusing_since(hass, "other@example.com") > since
+    assert _renewal_refused_issue_ids(hass) == []
 
 
 async def test_a_reauth_onto_an_account_without_the_installation_is_refused(hass):
@@ -6003,6 +6056,69 @@ async def test_reconfigure_with_no_running_session_reloads_on_its_own_sign_in(ha
     assert home.state is ConfigEntryState.LOADED
     setup_login.assert_not_awaited()
     assert hass.data[DOMAIN]["sessions"]["test@example.com"]["hub"] is hub
+
+
+@pytest.mark.parametrize(
+    ("start_flow", "reason"),
+    [
+        (_start_reauth_flow, "reauth_successful"),
+        (_start_reconfigure_flow, "reconfigure_successful"),
+    ],
+)
+async def test_signing_in_again_clears_the_accounts_renewal_refused_notice(
+    hass, start_flow, reason
+):
+    """The notice says Verisure keeps refusing the saved sign-in; a sign-in
+    from the reauth or Reconfigure dialog replaces it, so the notice goes."""
+    entry = _make_reauth_entry(hass)
+    raise_renewal_refused_issue(hass, "test@example.com")
+    result = await start_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["reason"] == reason
+    assert _renewal_refused_issue_ids(hass) == []
+
+
+async def test_reconfigure_signs_in_an_entry_waiting_to_retry_a_refused_token(hass):
+    """While Verisure refuses the saved token the entry waits to retry, and
+    the notice points the user at Reconfigure: the dialog opens for an entry in
+    that state, and its sign-in sets the entry up and ends the refusals."""
+    home = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_111",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "111"},
+        version=FlowHandler.VERSION,
+    )
+    home.add_to_hass(hass)
+    with _crashing_login(_hub_factory()):
+        assert not await hass.config_entries.async_setup(home.entry_id)
+    _backdate_refusals(hass, "test@example.com")
+    await _crash_on_the_next_setup(hass, home)
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert _renewal_refused_issue_ids(hass) == [
+        _renewal_refused_issue_id("test@example.com")
+    ]
+
+    result = await _start_reconfigure_flow(hass, home)
+    assert result["type"] == FlowResultType.FORM
+    with (
+        _patches(_reauth_hub_seeing("111")),
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert home.state is ConfigEntryState.LOADED
+    assert _refusals(hass) == {}
+    assert _renewal_refused_issue_ids(hass) == []
 
 
 def _hub_issuing(token):

@@ -65,16 +65,6 @@ class AccountBlockedError(AuthenticationError):
     """Raised when the user account is blocked by Verisure."""
 
 
-class RefreshTokenDeadError(AuthenticationError):
-    """Raised when xSRefreshLogin keeps failing on the stored refresh token.
-
-    A single crash (#568) or ``err 4`` rejection is classified transient. A
-    streak of them with no successful renewal in between means the token is
-    not coming back; subclassing AuthenticationError routes it to the reauth
-    prompt through ``is_genuine_auth_failure``. See ``dead_refresh_token_signal``.
-    """
-
-
 class WAFBlockedError(VerisureOwaError):
     """Raised when the Incapsula WAF blocks the request."""
 
@@ -223,10 +213,9 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
 
     Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
     "try again later" session error, and unrecognised null-data GraphQL errors
-    such as a single xSRefreshLogin server crash or err 4 rejection -- is
-    transient and must NOT trigger a reauth prompt. Unknown failures default to
-    transient. A *streak* of those is raised as RefreshTokenDeadError, which
-    this predicate does classify as genuine.
+    such as an xSRefreshLogin server crash or err 4 rejection, however often
+    it repeats -- is transient and must NOT trigger a reauth prompt. Unknown
+    failures default to transient.
     """
     if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
         return True
@@ -281,10 +270,10 @@ def is_refresh_token_rejected(err: VerisureOwaError) -> bool:
 
 
 def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
-    """Name the failure if it counts towards a dead-refresh-token streak, else None.
+    """Name the failure if it is Verisure refusing the saved sign-in, else None.
 
-    One occurrence stays transient; the client and setup each count a streak
-    of them before asking for re-authentication.
+    Always transient: the client and setup keep retrying and, once refusals
+    have lasted ``REFRESH_REFUSAL_ALERT_AFTER``, alert the user instead.
     """
     if is_refresh_login_crash(err):
         return "refresh-login crash"
