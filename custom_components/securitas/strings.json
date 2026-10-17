@@ -295,6 +295,10 @@
         "account_blocked": {
             "title": "Verisure has blocked your account",
             "description": "Verisure has blocked the account {username}, so Home Assistant can't reach your alarm. Use 'Forgot password' on the Verisure website to reset your password and unblock the account, then open Settings → Devices & services → Verisure OWA and follow the prompt to sign in with the new password. This notice clears once the sign-in succeeds."
+        },
+        "renewal_refused": {
+            "title": "Verisure keeps refusing the saved sign-in",
+            "description": "For at least 15 minutes Verisure has refused to renew the saved sign-in for {username}, so Home Assistant can't reach your alarm. This is often a temporary problem at Verisure: the integration keeps trying every few minutes and recovers by itself if Verisure accepts it again. If it doesn't, sign in again: open Settings → Devices & services → Verisure OWA, open the menu (⋮) on the entry and choose Reconfigure. This notice clears once a renewal or sign-in succeeds."
         }
     },
     "entity": {
