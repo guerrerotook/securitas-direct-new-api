@@ -16,8 +16,8 @@ import {
   migrateCompactAlarmConfig,
   reportDeprecatedElement,
   TRANSLATIONS,
-} from "./verisure-owa-alarm-shared.js?v=f3b00b0a-5.9.2";
-import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.2";
+} from "./verisure-owa-alarm-shared.js?v=27ef3c0d-5.9.3";
+import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.3";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
@@ -379,7 +379,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   getCardSize() { return 1; }
 
   static async getConfigElement() {
-    await import("./verisure-owa-alarm-badge-editor.js?v=73bf40cf-5.9.2");
+    await import("./verisure-owa-alarm-badge-editor.js?v=a17a8af5-5.9.3");
     return document.createElement("verisure-owa-alarm-badge-editor");
   }
 
