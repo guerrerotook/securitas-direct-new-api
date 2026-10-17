@@ -6,10 +6,10 @@ path (``_get_or_create_session`` now attaches the entry to a reused config-flow
 hub). These tests characterise the *client-side* handling of a single server
 crash, which is independent of that fix: one crash is classified transient
 (retryable), not a genuine auth failure, and it leaves the stored refresh token
-untouched. Escalation to reauth happens only on a *streak* of crashes (see
-RefreshTokenDeadError and the setup-path threshold in __init__); these tests
-guard against a lone crash being turned into a reauth trigger or corrupting
-the stored token. TestRefreshTokenRejectedHandling applies the same checks to
+untouched. However long the crashes last, they are retried, never turned into
+reauth (see REFRESH_REFUSAL_ALERT_AFTER in the client); these tests guard
+against a crash being turned into a reauth trigger or corrupting the stored
+token. TestRefreshTokenRejectedHandling applies the same checks to
 a single err 4 refusal of the stored token.
 """
 
@@ -54,7 +54,7 @@ class TestRefreshCrashHandling:
     The #557 *trap* — the entry stuck until deleted — arose from the setup path
     feeding a stale refresh token, now fixed. Independently, the client's
     handling of a single crash response must stay safe: it is classified
-    transient (so the coordinator retries; only a streak escalates to reauth)
+    transient (so the coordinator retries, never a reauth)
     and it leaves the stored refresh token untouched (so nothing is corrupted).
     """
 
@@ -73,7 +73,7 @@ class TestRefreshCrashHandling:
     async def test_crash_is_classified_transient_not_a_reauth_signal(
         self, mock_transport
     ) -> None:
-        """One crash is NOT a genuine auth failure: it retries; only a streak reauths."""
+        """A crash is NOT a genuine auth failure: it retries, never reauths."""
         mock_transport.execute.return_value = FR_CRASH_RESPONSE
         client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
 
@@ -84,7 +84,7 @@ class TestRefreshCrashHandling:
 
 
 class TestRefreshTokenRejectedHandling:
-    """The err 4 / 404 refusal reaches the streak counters recognisably."""
+    """The err 4 / 404 refusal reaches the refusal tracking recognisably."""
 
     async def test_raw_reply_raises_a_recognised_rejection(
         self, mock_transport

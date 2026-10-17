@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
 import logging
 import socket
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
@@ -154,10 +153,17 @@ from .discovery import (  # noqa: F401 — re-exported for backwards compatibili
 )
 from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
+    _RENEWAL_REFUSED_ISSUE,
+    _SIGN_IN_ISSUE,
     VerisureDevice,
     VerisureHub,
     _async_notify,
+    _hashed_issue_id,
     _notify,
+    _renewal_refused_issue_id,
+    _sign_in_issue_id,
+    clear_renewal_refused_issue,
+    raise_renewal_refused_issue,
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
@@ -172,6 +178,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
     generate_uuid,
 )
+from .verisure_owa_api.client._base import REFRESH_REFUSAL_ALERT_AFTER
 from .verisure_owa_api.exceptions import dead_refresh_token_signal
 
 _LOGGER = logging.getLogger(__name__)
@@ -462,16 +469,6 @@ def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 _DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"
-_SIGN_IN_ISSUE = "sign_in_again_"
-
-
-def _hashed_issue_id(prefix: str, key: str) -> str:
-    # Hashed: Home Assistant saves issue IDs, and the email must not be.
-    return prefix + hashlib.sha256(key.encode()).hexdigest()[:12]
-
-
-def _sign_in_issue_id(username: str) -> str:
-    return _hashed_issue_id(_SIGN_IN_ISSUE, username)
 
 
 @callback
@@ -501,16 +498,18 @@ def _raise_sign_in_issue(
 def _clear_sign_in_issues(
     hass: HomeAssistant, username: str | None, removing: ConfigEntry | None = None
 ) -> None:
-    """Clear ``username``'s issue, and those of accounts no entry uses any
-    more: signing an entry in again as another account, or deleting an
-    account's last entry, leaves nothing to sign in again there.
+    """Clear ``username``'s sign-in and renewal-refused issues, and those of
+    accounts no entry uses any more: signing an entry in again as another
+    account, or deleting an account's last entry, leaves nothing to sign in
+    again there.
 
     ``removing`` is the entry being deleted, which no longer counts.
     """
     raised = [
         issue_id
         for domain, issue_id in ir.async_get(hass).issues
-        if domain == DOMAIN and issue_id.startswith(_SIGN_IN_ISSUE)
+        if domain == DOMAIN
+        and issue_id.startswith((_SIGN_IN_ISSUE, _RENEWAL_REFUSED_ISSUE))
     ]
     if not raised:
         return
@@ -520,8 +519,10 @@ def _clear_sign_in_issues(
             continue
         if entry_username := entry.data.get(CONF_USERNAME):
             in_use.add(_sign_in_issue_id(entry_username))
+            in_use.add(_renewal_refused_issue_id(entry_username))
     if username is not None:
         in_use.discard(_sign_in_issue_id(username))
+        in_use.discard(_renewal_refused_issue_id(username))
     for issue_id in raised:
         if issue_id not in in_use:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
@@ -647,30 +648,50 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     return config, need_sign_in
 
 
-# Consecutive setup attempts whose stored refresh token crashed or was refused
-# by xSRefreshLogin (dead_refresh_token_signal) before setup gives up retrying
-# and asks for re-authentication (#568). At setup the token comes straight off
-# disk with no evidence it was ever valid, and every diagnosed case was a dead
-# token; one retry (HA's first backoff, a few seconds) absorbs a momentary
-# server blip. The count lives in hass.data because each retry builds a fresh
-# hub, and is keyed by username like ``sessions``: co-tenant entries retry the
-# same token and alternate as session creator.
-# Handing back any session, or signing in through the reauth or Reconfigure
-# dialog, resets it — other transient failures in between neither count nor reset.
-_SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
+def _note_setup_refresh_refusal(hass: HomeAssistant, username: str) -> None:
+    """Track a refusal of the account's stored token at setup; raise the
+    renewal-refused notice once refusals have lasted REFRESH_REFUSAL_ALERT_AFTER.
+
+    Kept in hass.data, keyed by username like ``sessions``: each retry builds a
+    fresh hub, and entries on one account retry the same token and alternate
+    as session creator.
+    """
+    refusals = hass.data[DOMAIN].setdefault("refresh_refusals", {})
+    now = datetime.now(UTC)
+    period = refusals.setdefault(username, {"since": now, "alerted": False})
+    if period["alerted"] or now - period["since"] < REFRESH_REFUSAL_ALERT_AFTER:
+        return
+    period["alerted"] = True
+    raise_renewal_refused_issue(hass, username)
+    _LOGGER.warning(
+        "Verisure has refused to renew the saved sign-in for %d minutes. The "
+        "integration keeps trying every few minutes; if it doesn't recover, "
+        "sign in again with Reconfigure in the entry's menu.",
+        int((now - period["since"]).total_seconds() // 60),
+    )
 
 
-def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
-    """Bump and return the account's consecutive setup-time dead-token count."""
-    streaks = hass.data[DOMAIN].setdefault("refresh_crash_streaks", {})
-    streaks[username] = streaks.get(username, 0) + 1
-    return streaks[username]
+def _clear_setup_refresh_refusals(hass: HomeAssistant, username: str) -> None:
+    """Forget the account's setup-time refusals once setup hands back a
+    session or the reauth or Reconfigure dialog signs in."""
+    hass.data.get(DOMAIN, {}).get("refresh_refusals", {}).pop(username, None)
 
 
-def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
-    """Forget the account's setup-time dead-token count once setup hands
-    back a session or the reauth or Reconfigure dialog signs in."""
-    hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
+@callback
+def _drop_unused_setup_refresh_refusals(
+    hass: HomeAssistant, removing: ConfigEntry
+) -> None:
+    """Forget setup-time refusals of accounts no entry but ``removing`` uses."""
+    refusals = hass.data.get(DOMAIN, {}).get("refresh_refusals")
+    if not refusals:
+        return
+    in_use = {
+        entry.data.get(CONF_USERNAME)
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.entry_id != removing.entry_id
+    }
+    for username in set(refusals) - in_use:
+        del refusals[username]
 
 
 async def _login_or_raise(
@@ -682,15 +703,14 @@ async def _login_or_raise(
 ) -> None:
     """Log the hub in, mapping failures to HA's setup exceptions.
 
-    A streak of dead-token signals (see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD)
-    becomes ConfigEntryAuthFailed like a credential rejection; HA's own reauth
-    card is the user-facing notice for that path, so unlike the credential
-    branches it raises no Repairs issue of its own.
+    Verisure refusing the stored token (dead_refresh_token_signal) is retried
+    like any passing fault, however long it lasts; see
+    _note_setup_refresh_refusal for the notice.
 
     ``retry_other_family`` marks a first attempt the caller will repeat on
     another address family. A failure to establish the connection is then
     re-raised as-is rather than mapped, so the attempt about to be retried does
-    not log an error or count towards the dead-token streak. Every other
+    not log an error or count as a refusal. Every other
     failure — including a timeout waiting for a reply — takes the mapping
     path, as it does for every other caller.
     """
@@ -712,7 +732,7 @@ async def _login_or_raise(
         # On the first of two family attempts (retry_other_family), re-raise a
         # connection that never opened untouched: the caller is about to repeat
         # it on another address family, so it must not log an error or count
-        # towards the dead-token streak. Every other error — timeouts waiting
+        # as a refusal. Every other error — timeouts waiting
         # for a reply included — takes the mapping path below. (The isinstance
         # guard narrows err for pyright; pylint doesn't narrow across `and`, so
         # its no-member on the guarded attribute is a false positive.)
@@ -730,16 +750,8 @@ async def _login_or_raise(
             "Unable to connect to Verisure: %s",
             err.log_detail(),
         )
-        signal = dead_refresh_token_signal(err)
-        if (
-            signal is not None
-            and _note_setup_refresh_crash(hass, username)
-            >= _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD
-        ):
-            raise ConfigEntryAuthFailed(
-                f"Stored refresh token keeps failing to renew (last: {signal}); "
-                "re-authentication required"
-            ) from None
+        if dead_refresh_token_signal(err) is not None:
+            _note_setup_refresh_refusal(hass, username)
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"
         ) from None
@@ -882,11 +894,14 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
 
     The current token is written at once, since it may have rotated past the
     one ``entry`` stored, unless ``entry`` is signed in to another account. A
-    condemned token is not written: it would replace the entry's own token,
-    which setup may still be able to use.
+    token Verisure keeps refusing is not written: it would replace the entry's
+    own token, which setup may still be able to use. Its notice is raised
+    instead, since the client raises it only once and a detached hub drops it.
     """
     hub.config_entry = entry
-    if not hub.refresh_token_is_dead:
+    if hub.refresh_refusals_persisting:
+        hub.raise_refusal_notice()
+    else:
         hub.persist_current_refresh_token()
 
 
@@ -941,6 +956,30 @@ def _release_flow_hold(hass: HomeAssistant, username: str, holder: str) -> None:
         _release_session_hold(sessions, username, session, holder)
 
 
+def _should_adopt(client: VerisureHub, stored_token: str) -> bool:
+    """A shared client whose token Verisure keeps refusing, reached with a
+    different stored token: a co-tenant's own, which may be older or newer."""
+    return (
+        client.refresh_refusals_persisting
+        and stored_token != client.get_refresh_token()
+    )
+
+
+async def _sign_in_with_adopted_token(
+    hass: HomeAssistant, client: VerisureHub, username: str, stored_token: str
+) -> None:
+    """Try a joining entry's stored token on the shared client; the caller
+    holds the client's renewal lock."""
+    replaced = client.adopt_refresh_token(stored_token)
+    try:
+        await _login_or_raise(hass, client, username)
+    except BaseException:
+        # The running entries still depend on the shared token, which may yet
+        # recover.
+        client.restore_refresh_token(replaced)
+        raise
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -983,33 +1022,33 @@ async def _get_or_create_session(
             # the xSRefreshLogin 'fr' crash on the next restart.
             if client.config_entry is None:
                 _attach_token_persistence(client, entry)
-            # A shared client condemned by a dead-token streak, reached with a
-            # stored token that is not the one it condemned: a co-tenant's own
-            # stored token, which may be older or newer than the condemned
-            # one. Try it on the shared client.
             stored_token = config.get(CONF_REFRESH_TOKEN)
-            if (
-                client.refresh_token_is_dead
-                and stored_token
-                and stored_token != client.get_refresh_token()
-            ):
-                client.adopt_refresh_token(stored_token)
-                await _login_or_raise(hass, client, username)
-                signed_in = True
+            if stored_token and _should_adopt(client, stored_token):
+                # Under the renewal lock, decided again once held: a renewal
+                # running now may recover the shared token, and must not be
+                # undone by rolling back a failed adoption. The sign-in calls
+                # Verisure directly and never takes this lock.
+                async with client.renewal_lock:
+                    if _should_adopt(client, stored_token):
+                        await _sign_in_with_adopted_token(
+                            hass, client, username, stored_token
+                        )
+                        signed_in = True
         else:
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
             _take_session_hold(sessions[username], entry.entry_id)
             signed_in = True
 
-    # Any session handed back resets the streak, even a reused one whose
-    # adopted token was never tried; a token that keeps failing to renew (a
-    # crash or an err 4 refusal) is caught by the runtime renewal streak
-    # instead.
-    _clear_setup_refresh_crash(hass, username)
-    # Only a sign-in made here shows the account can sign in now. A reused
-    # session may hold a token Verisure has just refused: adopting it made the
-    # session's token match this entry's, so this call does not try it again.
+    # Any session handed back ends the setup refusal period, even a reused one
+    # nobody signed in to here; refusals from here on are tracked by the
+    # client's renewals instead.
+    _clear_setup_refresh_refusals(hass, username)
+    # A raised alert outlives an adoption; the client clears it on success.
+    if not (client.refresh_refusals_persisting or client.refresh_refusal_alert_raised):
+        clear_renewal_refused_issue(hass, username)
+    # Only a sign-in made here shows the account can sign in now; a reused
+    # session's token may be one Verisure has just refused.
     if signed_in:
         _clear_sign_in_issues(hass, username)
     return client
@@ -1915,7 +1954,7 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
     reloaded entry set up again first. A plain reload keeps its session and
-    dead-token count; after reauth or Reconfigure the entry joins the session
+    its record of refusals; after reauth or Reconfigure the entry joins the session
     that dialog registered (and lets go of the old account's session if the
     account changed).
     """
@@ -2007,6 +2046,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     _async_update_duplicate_entry_issues(hass, removing=entry)
     _clear_sign_in_issues(hass, None, removing=entry)
+    _drop_unused_setup_refresh_refusals(hass, removing=entry)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return

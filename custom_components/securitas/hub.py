@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import logging
 from collections.abc import Callable
 from functools import partial
@@ -15,7 +16,8 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -47,11 +49,55 @@ from .verisure_owa_api import (
     VerisureOwaError,
 )
 from .verisure_owa_api.client import VerisureOwaClient
-from .verisure_owa_api.client._base import _token_fingerprint
+from .verisure_owa_api.client._base import (
+    RefreshTokenSnapshot,
+    _token_fingerprint,
+)
 from .verisure_owa_api.exceptions import is_account_blocked, is_genuine_auth_failure
 from .verisure_owa_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
+
+_SIGN_IN_ISSUE = "sign_in_again_"
+_RENEWAL_REFUSED_ISSUE = "renewal_refused_"
+
+
+def _hashed_issue_id(prefix: str, key: str) -> str:
+    # Hashed: Home Assistant saves issue IDs, and the email must not be.
+    return prefix + hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+def _sign_in_issue_id(username: str) -> str:
+    return _hashed_issue_id(_SIGN_IN_ISSUE, username)
+
+
+def _renewal_refused_issue_id(username: str) -> str:
+    return _hashed_issue_id(_RENEWAL_REFUSED_ISSUE, username)
+
+
+@callback
+def raise_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
+    """Tell the user in Repairs that Verisure keeps refusing the saved sign-in.
+
+    Not persistent, for the same reason as the sign-in issue: the
+    ``username`` placeholder is the email.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _renewal_refused_issue_id(username),
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="renewal_refused",
+        translation_placeholders={"username": username},
+    )
+
+
+@callback
+def clear_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
+    """Clear the account's renewal-refused issue, if raised."""
+    ir.async_delete_issue(hass, DOMAIN, _renewal_refused_issue_id(username))
 
 
 async def _async_notify(
@@ -184,6 +230,7 @@ class VerisureHub:
             log_filter=self.log_filter,
             refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
             on_refresh_token_changed=self._persist_refresh_token,
+            on_refresh_refusal_alert=self._refresh_refusal_alert,
         )
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
@@ -204,13 +251,14 @@ class VerisureHub:
         ConfigEntryAuthFailed — sending an empty password to the API would just
         waste a round trip.
 
-        A transient failure (network, 5xx, 409, WAF block, a single
+        A transient failure (network, 5xx, 409, WAF block, an
         xSRefreshLogin server crash or err 4 rejection) does not take that path:
         it propagates so setup maps it to ConfigEntryNotReady and retries,
         instead of forcing a needless reauth on a token-only account. This
         mirrors the transient-vs-genuine split the client and coordinators
-        already use via is_genuine_auth_failure(). A *streak* of those is
-        setup's call: see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD in __init__.
+        already use via is_genuine_auth_failure(). Verisure refusing the token
+        is retried this way however long it lasts; setup tracks how long (see
+        _note_setup_refresh_refusal in __init__).
 
         For an account that still has a stored password, this deliberately means
         a transient refresh failure retries rather than immediately burning a
@@ -541,14 +589,28 @@ class VerisureHub:
         return self.client.refresh_token_value
 
     @property
-    def refresh_token_is_dead(self) -> bool:
-        """True once the client has condemned its stored refresh token."""
-        return self.client.refresh_token_is_dead
+    def refresh_refusals_persisting(self) -> bool:
+        """True once Verisure has kept refusing the client's refresh token."""
+        return self.client.refresh_refusals_persisting
 
-    def adopt_refresh_token(self, value: str) -> None:
+    @property
+    def refresh_refusal_alert_raised(self) -> bool:
+        """True from the client's refusal alert until a renewal succeeds."""
+        return self.client.refresh_refusal_alert_raised
+
+    @property
+    def renewal_lock(self) -> asyncio.Lock:
+        """The lock the client's token renewals hold; see the client's."""
+        return self.client.renewal_lock
+
+    def adopt_refresh_token(self, value: str) -> RefreshTokenSnapshot:
         """Hand the client the stored refresh token of an entry joining this
         shared session."""
-        self.client.adopt_refresh_token(value)
+        return self.client.adopt_refresh_token(value)
+
+    def restore_refresh_token(self, snapshot: RefreshTokenSnapshot) -> None:
+        """Hand the client back what adopt_refresh_token replaced."""
+        self.client.restore_refresh_token(snapshot)
 
     def _persist_refresh_token(self, value: str) -> None:
         """Write a rotated refresh token back to the config entry.
@@ -588,6 +650,26 @@ class VerisureHub:
         _LOGGER.debug(
             "[refresh] persist refresh token: persist_fp=%s outcome=%s", fp, outcome
         )
+
+    def _refresh_refusal_alert(self, active: bool) -> None:
+        """Raise or clear the renewal-refused issue for the client's account.
+
+        A hub without a config entry (retired by reauth or Reconfigure, or
+        built by the config flow) must not re-raise an issue the sign-in
+        cleared.
+        """
+        if active:
+            self.raise_refusal_notice()
+        elif self.config_entry is not None:
+            clear_renewal_refused_issue(self.hass, self.client.username)
+
+    def raise_refusal_notice(self) -> None:
+        """Raise the renewal-refused issue, unless no entry uses the account:
+        the hub is detached, or Reconfigure moved its entry to another one."""
+        entry = self.config_entry
+        if entry is None or entry.data.get(CONF_USERNAME) != self.client.username:
+            return
+        raise_renewal_refused_issue(self.hass, self.client.username)
 
     def persist_current_refresh_token(self) -> None:
         """Write the current in-memory refresh token to the config entry now.

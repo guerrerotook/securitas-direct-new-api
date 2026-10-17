@@ -261,8 +261,8 @@ class TestRefreshCrashRecruitmentWarning:
     ) -> None:
         """A retry loop against a persistent crash logs the recruit line once.
 
-        The coordinator retries the failing refresh on each poll until the
-        crash streak trips; the recruitment WARNING must not repeat on those
+        The coordinator retries the failing refresh on every poll for as long
+        as the crash lasts; the recruitment WARNING must not repeat on those
         retries or it becomes the very log spam it was designed to avoid.
         """
         mock_transport.execute.return_value = FR_CRASH_RESPONSE
