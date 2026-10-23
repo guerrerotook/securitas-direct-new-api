@@ -5740,6 +5740,171 @@ async def test_setup_without_keep_password_drops_it(hass):
     assert CONF_PASSWORD not in result["data"]
 
 
+TICKED_CREDENTIALS = {
+    **USER_INPUT_CREDENTIALS,
+    CONF_PASSWORD: "typed-password",
+    CONF_KEEP_PASSWORD: True,
+}
+
+
+def _new_sign_in_hub():
+    """The hub a ticked dialog builds; its sign-in has its own refresh token."""
+    hub = _two_installation_hub()
+    hub.get_refresh_token.return_value = "new-refresh-token"
+    return hub
+
+
+async def test_add_installation_ticked_on_running_account_signs_in(hass):
+    """Ticked, a second installation on a running account signs in with the
+    typed password and replaces the account's session at once: the running
+    entry moves onto the new sign-in, and the new entry stores it."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    new_hub = _new_sign_in_hub()
+
+    with _patches(new_hub) as hub_cls:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+
+    assert result["step_id"] == "options"
+    new_hub.login.assert_awaited_once()
+    built_with = hub_cls.call_args.args[0]
+    assert built_with[CONF_PASSWORD] == "typed-password"
+    assert built_with[CONF_DEVICE_ID] == running.config[CONF_DEVICE_ID]
+    assert built_with[CONF_UNIQUE_ID] == running.config[CONF_UNIQUE_ID]
+    assert built_with[CONF_DEVICE_INDIGITALL] == running.config[CONF_DEVICE_INDIGITALL]
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is new_hub
+    assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert home.state is ConfigEntryState.LOADED
+    assert session["holders"] == {
+        home.entry_id,
+        f"config_flow:{result['flow_id']}",
+    }
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert result["data"][CONF_PASSWORD] == "typed-password"
+    assert result["data"][CONF_DEVICE_ID] == running.config[CONF_DEVICE_ID]
+    assert _flow_sessions(hass)["test@example.com"]["hub"] is new_hub
+
+
+async def test_add_installation_ticked_wrong_password_shows_invalid_auth(hass):
+    """A wrong typed password is caught now; the running session and its
+    entries carry on untouched."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    holders_before = set(record["holders"])
+    home_data_before = dict(home.data)
+    new_hub = _new_sign_in_hub()
+    new_hub.login.side_effect = AuthenticationError("bad credentials")
+
+    with _patches(new_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is running
+    assert record["holders"] == holders_before
+    assert dict(home.data) == home_data_before
+    assert home.state is ConfigEntryState.LOADED
+
+
+async def test_add_installation_ticked_then_abandoned_leaves_other_entries_working(
+    hass,
+):
+    """Closing the dialog after the sign-in leaves the running entry on the
+    new sign-in, which replaced its old one, and lets the dialog's hold go."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    new_hub = _new_sign_in_hub()
+
+    with _patches(new_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert result["step_id"] == "options"
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is new_hub
+    assert session["holders"] == {home.entry_id}
+    assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert home.state is ConfigEntryState.LOADED
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_add_installation_ticked_through_a_text_message_code_signs_in(hass):
+    """A ticked sign-in that needs a text-message code replaces the running
+    session once the code is accepted, not before."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    new_hub = _hub_factory(two_fa=True)
+    new_hub.config = make_config_entry_data()
+    new_hub.client.list_installations = running.client.list_installations
+    new_hub.get_refresh_token.return_value = "new-refresh-token"
+
+    with _patches(new_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+        assert result["step_id"] == "phone_list"
+        assert _flow_sessions(hass)["test@example.com"] is record
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={"phones": "0_555-1234"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["step_id"] == "options"
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is new_hub
+    assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert home.entry_id in session["holders"]
+
+
+async def test_add_installation_unticked_on_running_account_borrows(hass):
+    """Unticked, a second installation borrows the running session and never
+    signs in."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    running.login.reset_mock()
+    new_hub = _new_sign_in_hub()
+
+    with _patches(new_hub) as hub_cls:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+            data={**TICKED_CREDENTIALS, CONF_KEEP_PASSWORD: False},
+        )
+
+    assert result["step_id"] == "options"
+    hub_cls.assert_not_called()
+    new_hub.login.assert_not_awaited()
+    running.login.assert_not_awaited()
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is running
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_PASSWORD not in result["data"]
+    assert home.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
 async def test_setup_form_offers_the_box_unticked_after_the_password(hass):
     """The setup form shows the box, off by default, below the password."""
     result = await hass.config_entries.flow.async_init(
