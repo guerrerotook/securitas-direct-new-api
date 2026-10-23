@@ -941,9 +941,12 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
     one ``entry`` stored, unless ``entry`` is signed in to another account. A
     token Verisure keeps refusing is not written: it would replace the entry's
     own token, which setup may still be able to use. Its notice is raised
-    instead, since the client raises it only once and a detached hub drops it.
+    instead, since the client raises it only once and a detached hub drops it;
+    so is the "can't reach Verisure" notice, for the same reason.
     """
     hub.config_entry = entry
+    if hub.unreachable_alert_raised:
+        hub.raise_unreachable_notice()
     if hub.refresh_refusals_persisting:
         hub.raise_refusal_notice()
     else:

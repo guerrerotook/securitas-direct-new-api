@@ -762,13 +762,18 @@ class VerisureHub:
     def _unreachable_alert(self, active: bool) -> None:
         """Raise or clear the "can't reach Verisure" issue for the client's
         account, by the same entry rules as the renewal-refused issue."""
-        entry = self.config_entry
-        if entry is None:
-            return
-        if not active:
+        if active:
+            self.raise_unreachable_notice()
+        elif self.config_entry is not None:
             clear_unreachable_issue(self.hass, self.client.username)
-        elif entry.data.get(CONF_USERNAME) == self.client.username:
-            raise_unreachable_issue(self.hass, self.client.username)
+
+    def raise_unreachable_notice(self) -> None:
+        """Raise the "can't reach Verisure" issue, unless no entry uses the
+        account: the hub is detached, or Reconfigure moved its entry."""
+        entry = self.config_entry
+        if entry is None or entry.data.get(CONF_USERNAME) != self.client.username:
+            return
+        raise_unreachable_issue(self.hass, self.client.username)
 
     def persist_current_refresh_token(self) -> None:
         """Write the current in-memory refresh token to the config entry now.

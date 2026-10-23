@@ -4623,6 +4623,34 @@ class TestCoTenantStoredTokenRecovery:
         assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
         assert entry.data[CONF_REFRESH_TOKEN] == "own"
 
+    async def test_an_unreachable_notice_due_while_detached_appears_on_reattach(
+        self, hass, clock
+    ):
+        """The client alerts once per unreachable period; an alert that came
+        while the hub had no entry is raised when one attaches."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "own"},
+        )
+        entry.add_to_hass(hass)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = None
+        hub.client.refresh_token_value = "shared"
+        hub.client._transport.execute = AsyncMock(
+            side_effect=APIConnectionError("no route")
+        )
+        for _ in range(2):
+            with pytest.raises(APIConnectionError):
+                await hub.client._execute_raw({}, "Status")
+            clock.advance(minutes=60)
+        assert hub.unreachable_alert_raised
+        assert _unreachable_issues(hass) == {}
+
+        _attach_token_persistence(hub, entry)
+
+        assert list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]
+
 
 class TestKeptPasswordSync:
     """The account's shared client uses a kept password only while one of the
