@@ -33,7 +33,6 @@ from ..exceptions import (
     dead_refresh_token_signal,
     is_credential_rejection,
     is_genuine_auth_failure,
-    is_refresh_login_crash,
 )
 from ..http_transport import HttpTransport
 from ..models import Installation, OtpPhone
@@ -895,7 +894,12 @@ class _ClientBase:
         without spamming healthy installations, where the noisy per-rotation
         lines stay on DEBUG.
         """
-        if self._refresh_crash_reported or not is_refresh_login_crash(err):
+        # A crash that also carries a server fault or err 60067 is not a
+        # refusal, so the Repairs notice this warning promises never comes.
+        if (
+            self._refresh_crash_reported
+            or dead_refresh_token_signal(err) != "refresh-login crash"
+        ):
             return
         self._refresh_crash_reported = True
         _LOGGER.warning(
