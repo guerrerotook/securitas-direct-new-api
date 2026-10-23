@@ -1190,7 +1190,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": "cannot_connect"},
             )
 
-        self._track_setup_password()
         try:
             installations = await self.hub.client.list_installations()
         except VerisureOwaError:
@@ -1390,6 +1389,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         the first registered. A borrowed session is already held and signs in
         again without the lock, so an entry unloading meanwhile never waits on
         this dialog.
+
+        ``_track_setup_password`` runs as soon as the sign-in proves the
+        password, before anything else is awaited: a newer sign-in or a
+        rejection from then on must reach this dialog's copy.
         """
         account_entries: list[config_entries.ConfigEntry] | None = None
         if self._owns_hub:
@@ -1398,12 +1401,14 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 session = sessions.get(username)
                 if session is not None and self.config.get(CONF_KEEP_PASSWORD):
                     account_entries = await self._sign_in_in_place_of(username, session)
+                    self._track_setup_password()
                 elif session is not None:
                     # An entry or another dialog signed in while this dialog
                     # waited for the lock or for a 2FA code.
                     self._borrow_session(username, session)
                 else:
                     await self._sign_in_if_needed()
+                    self._track_setup_password()
                     assert self.hub is not None
                     sessions[username] = _new_session_record(self.hub)
                     # The flow holds the session until it ends; an entry it
@@ -1415,6 +1420,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await self._reload_onto_sign_in(username, account_entries)
                 return
         await self._sign_in_if_needed()
+        self._track_setup_password()
 
     async def _sign_in_in_place_of(
         self, username: str, session: dict[str, Any]

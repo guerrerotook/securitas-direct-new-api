@@ -6036,6 +6036,88 @@ async def test_add_installation_ticked_saves_the_password_of_a_newer_sign_in(
     assert created["data"][CONF_PASSWORD] == "new-password"
 
 
+def _meanwhile_setup_reloads_the_account(action):
+    """Run ``action`` while a setup dialog that has just replaced the
+    account's session waits for the account's entries to reload: the lock is
+    already released, so another dialog or a renewal can act then."""
+    original = FlowHandler._reload_onto_sign_in
+
+    async def reload(self, username, entries):
+        if self.source == SOURCE_USER:
+            await action()
+        await original(self, username, entries)
+
+    return patch.object(FlowHandler, "_reload_onto_sign_in", reload)
+
+
+async def test_add_installation_ticked_saves_a_newer_sign_in_made_during_its_reload(
+    hass,
+):
+    """A Reconfigure finishing while the ticked dialog's own sign-in is still
+    reloading the account's entries replaces that sign-in: the new entry
+    stores the newer password beside the newer saved sign-in."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    replacement = _new_sign_in_hub()
+    replacement.get_refresh_token.return_value = "latest-token"
+
+    async def reconfigure_the_account():
+        reconfigure = await _start_reconfigure_flow(hass, home)
+        done, _ = await _submit_sign_in(
+            hass,
+            reconfigure["flow_id"],
+            replacement,
+            password="new-password",
+            keep_password=True,
+        )
+        assert done["reason"] == "reconfigure_successful"
+
+    with (
+        _patches(_new_sign_in_hub()),
+        _meanwhile_setup_reloads_the_account(reconfigure_the_account),
+    ):
+        pending = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert pending["step_id"] == "options"
+
+    created = await _finish_from_options(hass, pending)
+
+    assert created["data"][CONF_REFRESH_TOKEN] == "latest-token"
+    assert created["data"][CONF_KEEP_PASSWORD] is True
+    assert created["data"][CONF_PASSWORD] == "new-password"
+
+
+async def test_add_installation_ticked_drops_a_password_rejected_during_its_reload(
+    hass,
+):
+    """Verisure rejecting the typed password while the ticked dialog's own
+    sign-in is still reloading the account's entries removes it from the
+    dialog too: the new entry keeps the box ticked but stores no password."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    hass.config_entries.async_update_entry(
+        home, data={**home.data, CONF_KEEP_PASSWORD: True}
+    )
+
+    async def reject_the_typed_password():
+        await _reject_kept_password(hass, "typed-password")
+
+    with (
+        _patches(_new_sign_in_hub()),
+        _meanwhile_setup_reloads_the_account(reject_the_typed_password),
+    ):
+        pending = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert pending["step_id"] == "options"
+    assert CONF_PASSWORD not in home.data
+
+    created = await _finish_from_options(hass, pending)
+
+    assert created["type"] == FlowResultType.CREATE_ENTRY
+    assert created["data"][CONF_KEEP_PASSWORD] is True
+    assert CONF_PASSWORD not in created["data"]
+
+
 async def test_add_installation_ticked_through_a_text_message_code_signs_in(hass):
     """A ticked sign-in that needs a text-message code replaces the running
     session once the code is accepted, not before."""
