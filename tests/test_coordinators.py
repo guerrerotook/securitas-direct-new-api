@@ -29,6 +29,7 @@ from custom_components.securitas.coordinators import (
     LockData,
     SentinelCoordinator,
     SentinelData,
+    _handle_session_expired,
 )
 from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
@@ -572,6 +573,34 @@ class TestAlarmCoordinator:
         with pytest.raises(ConfigEntryAuthFailed):
             await coord._async_update_data()
         client.forget_rejected_password.assert_called_once_with(rejection)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_session_expired_relogins_spend_one_sign_in(self):
+        """Coordinators sharing the client relogin one at a time, so a
+        password Verisure rejects is sent once, not once per coordinator."""
+        client = _make_client()
+        client.renewal_lock = asyncio.Lock()
+
+        async def rejected():
+            await asyncio.sleep(0)
+            raise AuthenticationError("credentials rejected")
+
+        client.login.side_effect = rejected
+        client.forget_rejected_password = MagicMock(
+            side_effect=lambda _err: setattr(client, "password", "")
+        )
+
+        results = await asyncio.gather(
+            _handle_session_expired(client, SessionExpiredError("expired")),
+            _handle_session_expired(client, SessionExpiredError("expired")),
+            return_exceptions=True,
+        )
+
+        client.login.assert_awaited_once()
+        assert sorted(type(r).__name__ for r in results) == [
+            "ConfigEntryAuthFailed",
+            "UpdateFailed",
+        ]
 
     @pytest.mark.asyncio
     async def test_session_expired_transient_login_failure_raises_update_failed(self):
