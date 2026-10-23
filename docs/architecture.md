@@ -341,7 +341,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
    ├── TwoFactorRequiredError → raise ConfigEntryAuthFailed (triggers reauth flow)
    ├── AuthenticationError → raise ConfigEntryAuthFailed (triggers reauth flow)
    ├── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
-   └── …including an xSRefreshLogin crash or err 4 / err 7 refusal, however long it lasts; after 15 minutes of them → renewal_refused Repairs issue (#647)
+   └── …including an xSRefreshLogin crash or err 4 or err 7 refusal, however long it lasts; after 15 minutes of them → renewal_refused Repairs issue (#647)
 6. Assign shared ApiQueue (per domain/country)
 7. List installations, get_services() per installation
    └── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
@@ -1146,7 +1146,7 @@ tests/
 - `login_response()`, `refresh_response()`, `validate_device_response()` — Build realistic API response dicts with sensible defaults and overridable fields.
 - `refresh_crash_response()` / `refresh_login_crash_error()` — The `xSRefreshLogin` server crash as a response dict / as the `VerisureOwaError` the client raises; the input contract for `is_refresh_login_crash`.
 - `refresh_token_rejected_response()` / `refresh_token_rejected_error()` — The `xSRefreshLogin` err 4 / 404 refusal of the stored token as a response dict / as the `VerisureOwaError` the client raises; the input contract for `is_refresh_token_rejected`.
-- `refresh_token_refused_err7_response()` / `refresh_token_refused_err7_error()` — The same for the `xSRefreshLogin` err 7 / 401 refusal (#652).
+- `refresh_token_rejected_err7_response()` / `refresh_token_rejected_err7_error()` — The same for the `xSRefreshLogin` err 7 / 401 refusal (#652).
 
 **Integration fixtures:**
 - `make_installation(**overrides)` — Factory for `Installation` Pydantic model with defaults (number, panel, address, etc.).

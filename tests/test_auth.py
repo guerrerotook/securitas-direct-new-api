@@ -32,7 +32,7 @@ from .conftest import (
     make_jwt,
     refresh_login_crash_error,
     refresh_response,
-    refresh_token_refused_err7_error,
+    refresh_token_rejected_err7_error,
     refresh_token_rejected_error,
     validate_device_response,
 )
@@ -684,7 +684,7 @@ REFUSALS = pytest.mark.parametrize(
     "make_refusal",
     [
         refresh_token_rejected_error,
-        refresh_token_refused_err7_error,
+        refresh_token_rejected_err7_error,
         refresh_login_crash_error,
     ],
     ids=["err4", "err7", "crash"],
@@ -890,10 +890,16 @@ class TestRefusalsKeepRetrying:
     async def test_refusals_and_crashes_share_one_period(self, mock_transport, clock):
         alerts = MagicMock()
         client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
-        refusals = [refresh_token_rejected_error, refresh_login_crash_error]
+        refusals = [
+            refresh_token_rejected_error,
+            refresh_token_rejected_err7_error,
+            refresh_login_crash_error,
+        ]
 
         for minute in range(16):
-            client.refresh_token = AsyncMock(side_effect=refusals[minute % 2]())
+            client.refresh_token = AsyncMock(
+                side_effect=refusals[minute % len(refusals)]()
+            )
             await _poll(client)
             clock.advance(minutes=1)
 

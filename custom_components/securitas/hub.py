@@ -251,8 +251,8 @@ class VerisureHub:
         ConfigEntryAuthFailed — sending an empty password to the API would just
         waste a round trip.
 
-        A transient failure (network, 5xx, 409, WAF block, an
-        xSRefreshLogin server crash or err 4 / 7 rejection) does not take that path:
+        A transient failure (network, 5xx, 409, WAF block, an xSRefreshLogin
+        server crash or err 4 or err 7 rejection) does not take that path:
         it propagates so setup maps it to ConfigEntryNotReady and retries,
         instead of forcing a needless reauth on a token-only account. This
         mirrors the transient-vs-genuine split the client and coordinators

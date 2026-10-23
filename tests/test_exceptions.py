@@ -29,7 +29,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 
 from .conftest import (
     refresh_login_crash_error,
-    refresh_token_refused_err7_error,
+    refresh_token_rejected_err7_error,
     refresh_token_rejected_error,
 )
 
@@ -374,17 +374,17 @@ class TestIsRefreshLoginCrash:
 
 
 class TestIsRefreshTokenRejected:
-    """Identifies Verisure refusing the stored refresh token with err 4 / 404."""
+    """Identifies Verisure refusing the stored token: err 4 / 404 or err 7 / 401."""
 
     def test_err_4_on_refresh_login_matches(self):
         assert is_refresh_token_rejected(refresh_token_rejected_error()) is True
 
     def test_err_7_on_refresh_login_matches(self):
         """#652: Verisure refused renewals with err 7 / 401 until a new sign-in."""
-        assert is_refresh_token_rejected(refresh_token_refused_err7_error()) is True
+        assert is_refresh_token_rejected(refresh_token_rejected_err7_error()) is True
 
     def test_err_7_on_a_different_path_does_not_match(self):
-        err = refresh_token_refused_err7_error()
+        err = refresh_token_rejected_err7_error()
         err.response_body["errors"][0]["path"] = ["xSArmPanel"]
         assert is_refresh_token_rejected(err) is False
 
@@ -433,8 +433,8 @@ class TestDeadRefreshTokenSignal:
             "refresh-token rejection (err 4)"
         )
 
-    def test_err_7_refusal_is_named(self):
-        assert dead_refresh_token_signal(refresh_token_refused_err7_error()) == (
+    def test_err_7_rejection_is_named(self):
+        assert dead_refresh_token_signal(refresh_token_rejected_err7_error()) == (
             "refresh-token rejection (err 7)"
         )
 
@@ -486,7 +486,7 @@ class TestRefusalsNeverAskForReauth:
         [
             refresh_login_crash_error,
             refresh_token_rejected_error,
-            refresh_token_refused_err7_error,
+            refresh_token_rejected_err7_error,
         ],
     )
     def test_refusal_is_not_genuine(self, make_err):

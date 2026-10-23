@@ -192,7 +192,7 @@ def refresh_token_rejected_error() -> VerisureOwaError:
     return err
 
 
-def refresh_token_refused_err7_response() -> dict:
+def refresh_token_rejected_err7_response() -> dict:
     """Build the xSRefreshLogin ``err 7`` / 401 refusal, as returned (#652).
 
     Verisure answered every renewal this way for seven hours while its own
@@ -212,10 +212,10 @@ def refresh_token_refused_err7_response() -> dict:
     }
 
 
-def refresh_token_refused_err7_error() -> VerisureOwaError:
+def refresh_token_rejected_err7_error() -> VerisureOwaError:
     """Build the xSRefreshLogin ``err 7`` refusal as refresh_token() raises it."""
-    body = refresh_token_refused_err7_response()
-    err = VerisureOwaError(body["errors"][0]["message"])
+    body = refresh_token_rejected_err7_response()
+    err = VerisureOwaError(body["errors"][0]["message"], http_status=401)
     err.response_body = body
     return err
 

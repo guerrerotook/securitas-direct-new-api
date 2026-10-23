@@ -26,7 +26,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 
 from .conftest import (
     refresh_crash_response,
-    refresh_token_refused_err7_response,
+    refresh_token_rejected_err7_response,
     refresh_token_rejected_response,
 )
 
@@ -93,7 +93,7 @@ class TestRefreshTokenRejectedHandling:
 
     @pytest.mark.parametrize(
         "response",
-        [refresh_token_rejected_response, refresh_token_refused_err7_response],
+        [refresh_token_rejected_response, refresh_token_rejected_err7_response],
         ids=["err4", "err7"],
     )
     async def test_raw_reply_raises_a_recognised_rejection(
