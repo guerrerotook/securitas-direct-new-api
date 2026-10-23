@@ -165,8 +165,8 @@ _GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset(
     {_ACCOUNT_BLOCKED_ERROR_CODE, "60067"}
 )
 
-# Codes xSRefreshLogin sends when it refuses the stored token; see
-# is_refresh_token_rejected.
+# The refusal codes is_refresh_token_rejected names; dead_refresh_token_signal
+# counts any code.
 _REFRESH_REFUSAL_ERROR_CODES: frozenset[str] = frozenset({"4", "7"})
 
 
@@ -217,8 +217,9 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
 
     Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
     "try again later" session error, and unrecognised null-data GraphQL errors
-    such as an xSRefreshLogin server crash or err 4 or err 7 rejection, however often
-    it repeats -- is transient and must NOT trigger a reauth prompt. Unknown
+    such as an xSRefreshLogin server crash or any other refusal of the saved
+    sign-in (see ``dead_refresh_token_signal``), however often it repeats -- is
+    transient and must NOT trigger a reauth prompt. Unknown
     failures default to transient.
     """
     if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
@@ -276,11 +277,39 @@ def is_refresh_token_rejected(err: VerisureOwaError) -> bool:
 def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
     """Name the failure if it is Verisure refusing the saved sign-in, else None.
 
+    Any error Verisure answers on the ``xSRefreshLogin`` path is a refusal,
+    whatever its code, unless it is a genuine credential failure, Verisure's
+    own timeout reply, or carries a 5xx ``data.status`` (a server fault, not
+    a verdict on the saved sign-in).
+
     Always transient: the client and setup keep retrying and, once refusals
     have lasted ``REFRESH_REFUSAL_ALERT_AFTER``, alert the user instead.
     """
     if is_refresh_login_crash(err):
         return "refresh-login crash"
-    if is_refresh_token_rejected(err):
-        return f"refresh-token rejection (err {_error_code(err)})"
-    return None
+    first = _first_error(err.response_body)
+    if first is None:
+        return None
+    path = first.get("path")
+    if not (isinstance(path, list) and "xSRefreshLogin" in path):
+        return None
+    if is_genuine_auth_failure(err):
+        return None
+    data = first.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    if first.get("name") == "TimeoutError" or data.get("err") == "TimeoutError":
+        return None
+    if _server_status(data.get("status")):
+        return None
+    code = _error_code(err)
+    if code is not None:
+        return f"refresh-token rejection (err {code})"
+    return "refresh-login error"
+
+
+def _server_status(status: object) -> bool:
+    """True when a GraphQL error's ``data.status`` is a 5xx (int or numeric str)."""
+    if isinstance(status, str) and status.strip().isdigit():
+        status = int(status)
+    return isinstance(status, int) and status >= 500

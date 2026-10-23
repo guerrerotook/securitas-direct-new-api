@@ -29,6 +29,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 
 from .conftest import (
     refresh_login_crash_error,
+    refresh_timeout_reply_error,
     refresh_token_rejected_err7_error,
     refresh_token_rejected_error,
 )
@@ -459,6 +460,43 @@ class TestDeadRefreshTokenSignal:
 
     def test_no_response_body_is_not_a_signal(self):
         assert dead_refresh_token_signal(VerisureOwaError("boom")) is None
+
+    @staticmethod
+    def _refresh_error(data: dict, *, path: list[str] | None = None):
+        err = VerisureOwaError("boom")
+        err.response_body = {
+            "errors": [
+                {
+                    "message": "boom",
+                    "name": "ApiError",
+                    "data": data,
+                    "path": path or ["xSRefreshLogin"],
+                }
+            ],
+            "data": {"xSRefreshLogin": None},
+        }
+        return err
+
+    def test_unknown_code_on_refresh_login_is_a_refusal(self):
+        err = self._refresh_error({"res": "ERROR", "err": "99", "status": 401})
+        assert dead_refresh_token_signal(err) == "refresh-token rejection (err 99)"
+
+    def test_error_without_code_on_refresh_login_is_a_refusal(self):
+        err = self._refresh_error({})
+        assert dead_refresh_token_signal(err) == "refresh-login error"
+
+    def test_verisure_timeout_reply_is_not_a_refusal(self):
+        assert dead_refresh_token_signal(refresh_timeout_reply_error()) is None
+
+    def test_server_status_on_refresh_login_is_not_a_refusal(self):
+        err = self._refresh_error({"res": "ERROR", "err": "7", "status": 503})
+        assert dead_refresh_token_signal(err) is None
+
+    def test_unknown_code_on_another_path_is_not_a_refusal(self):
+        err = self._refresh_error(
+            {"res": "ERROR", "err": "99", "status": 401}, path=["xSArmPanel"]
+        )
+        assert dead_refresh_token_signal(err) is None
 
 
 # ── _error_code_from_body ─────────────────────────────────────────────────────

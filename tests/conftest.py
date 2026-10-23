@@ -220,6 +220,27 @@ def refresh_token_rejected_err7_error() -> VerisureOwaError:
     return err
 
 
+def refresh_timeout_reply_error() -> VerisureOwaError:
+    """Build Verisure's own timeout reply to xSRefreshLogin (#652).
+
+    Verisure answered, but only to say its backend timed out: not a refusal.
+    """
+    body = {
+        "errors": [
+            {
+                "message": "operation timed out",
+                "name": "TimeoutError",
+                "data": {"err": "TimeoutError"},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+    err = VerisureOwaError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
+
+
 def refresh_response(
     *,
     hash_token: str | None = None,
