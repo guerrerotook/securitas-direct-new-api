@@ -1176,6 +1176,20 @@ class TestRefusalsKeepRetrying:
         assert client.refresh_refusals_persisting is False
 
 
+def _genuine_code_rejection() -> VerisureOwaError:
+    err = VerisureOwaError("Invalid session")
+    err.response_body = {"errors": [{"data": {"err": "60067"}}]}
+    return err
+
+
+_SIGN_IN_REJECTIONS = [
+    pytest.param(lambda: AuthenticationError("wrong password"), id="wrong-password"),
+    pytest.param(lambda: AccountBlockedError("blocked"), id="blocked"),
+    pytest.param(lambda: TwoFactorRequiredError("sms code"), id="sms-code"),
+    pytest.param(_genuine_code_rejection, id="err-60067"),
+]
+
+
 class TestKeptPassword:
     """A password the user chose to keep is spent at the first refusal; one
     held only in memory waits until refusals persist."""
@@ -1232,6 +1246,64 @@ class TestKeptPassword:
             clock.advance(minutes=1)
             await _poll(client)
         alerts.assert_called_once_with(True)
+
+    @pytest.mark.parametrize("make_rejection", _SIGN_IN_REJECTIONS)
+    async def test_rejected_kept_password_is_not_tried_again(
+        self, mock_transport, clock, make_rejection
+    ):
+        """Verisure blocks an account after three failed sign-ins, so a kept
+        password it rejects is dropped: the coordinators sharing the client
+        do not each spend one more attempt."""
+        client = _token_only_client(
+            mock_transport, password="secret", password_kept=True
+        )
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        rejection = make_rejection()
+        client.login = AsyncMock(side_effect=rejection)
+
+        assert await _poll(client) is rejection
+        assert client.password == ""
+        assert client.password_kept is False
+
+        for _ in range(3):
+            clock.advance(minutes=5)
+            results = await _race(client)
+            assert all(isinstance(r, VerisureOwaError) for r in results)
+        client.login.assert_awaited_once()
+
+    async def test_kept_password_failing_transiently_is_kept(
+        self, mock_transport, clock
+    ):
+        client = _token_only_client(
+            mock_transport, password="secret", password_kept=True
+        )
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        client.login = AsyncMock(side_effect=APIConnectionError("connection reset"))
+
+        assert isinstance(await _poll(client), APIConnectionError)
+        assert client.password == "secret"
+        assert client.password_kept is True
+
+    async def test_rejected_in_memory_password_is_not_tried_again(
+        self, mock_transport, clock
+    ):
+        """A password held only in memory shares the fallback, and so the rule."""
+        client = _token_only_client(mock_transport, password="secret")
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
+        client.login = AsyncMock(side_effect=AuthenticationError("wrong password"))
+        clock.advance(minutes=5)
+
+        assert isinstance(await _poll(client), AuthenticationError)
+        assert client.password == ""
+
+        for _ in range(3):
+            clock.advance(minutes=5)
+            await _poll(client)
+        client.login.assert_awaited_once()
 
     @REFUSALS
     async def test_in_memory_password_waits_for_persisting_refusals(

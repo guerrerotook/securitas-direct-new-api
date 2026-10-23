@@ -183,6 +183,7 @@ async def _handle_session_expired(
             if isinstance(login_err, VerisureOwaError)
             else VerisureOwaError(f"Login timed out: {login_err!r}")
         )
+        client.forget_rejected_password(owa_err)
         if is_genuine_auth_failure(owa_err):
             raise ConfigEntryAuthFailed(
                 f"Re-authentication failed: {owa_err}"

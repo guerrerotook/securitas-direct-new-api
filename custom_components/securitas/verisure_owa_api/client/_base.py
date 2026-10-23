@@ -625,17 +625,32 @@ class _ClientBase:
                                 signal,
                             )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
-            # pylint: disable=no-member  # provided by _AuthMixin
-            await self.login()  # type: ignore[attr-defined]
+            try:
+                # pylint: disable=no-member  # provided by _AuthMixin
+                await self.login()  # type: ignore[attr-defined]
+            except VerisureOwaError as err:
+                self.forget_rejected_password(err)
+                raise
+
+    def forget_rejected_password(self, err: VerisureOwaError) -> None:
+        """Stop signing in by itself with a password Verisure has rejected.
+
+        Verisure blocks the account after three failed sign-ins, and every
+        coordinator sharing this client would otherwise spend one. The user
+        types the password again when asked to sign in again.
+        """
+        if is_genuine_auth_failure(err):
+            self.password = ""
+            self.password_kept = False
 
     def _pace_refused_renewal(self) -> None:
-        """Raise without contacting Verisure while persisting refusals are paced.
+        """Raise without contacting Verisure while refusals are paced: once
+        they persist, or from the first one when the password is kept, since a
+        kept password is spent at every refusal that is not paced.
 
         Not recorded as a recovery failure: no attempt was made.
         """
         last = self._last_renewal_attempt
-        # A kept password is spent at every unpaced refusal, so it is paced from
-        # the first one: otherwise every poll would sign in with it.
         refusing = self._refusals_persisting or (
             self.password_kept and self._refresh_refused_since is not None
         )

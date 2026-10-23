@@ -301,18 +301,20 @@ class VerisureHub:
         waste a round trip.
 
         A transient failure (network, 5xx, 409, WAF block, an xSRefreshLogin
-        server crash or err 4 or err 7 rejection) does not take that path:
-        it propagates so setup maps it to ConfigEntryNotReady and retries,
-        instead of forcing a needless reauth on a token-only account. This
-        mirrors the transient-vs-genuine split the client and coordinators
+        server crash or any other refusal of the saved sign-in) does not take
+        that path: it propagates so setup maps it to ConfigEntryNotReady and
+        retries, instead of forcing a needless reauth on a token-only account.
+        This mirrors the transient-vs-genuine split the client and coordinators
         already use via is_genuine_auth_failure(). Verisure refusing the token
         is retried this way however long it lasts; setup tracks how long (see
         _note_setup_refresh_refusal in __init__).
 
-        For an account that still has a stored password, this deliberately means
-        a transient refresh failure retries rather than immediately burning a
-        full password login — the same "don't spend a login on a passing backend
-        wobble" trade-off the steady-state client path (_base.py) makes.
+        The exception is a password the user chose to keep: a refusal is then
+        followed at once by a sign-in with it, and a password Verisure rejects
+        is dropped from the client so it is not tried again. A password held
+        only in memory is not spent on a refusal at setup: the same "don't
+        spend a login on a passing backend wobble" trade-off the steady-state
+        client path (_base.py) makes until refusals persist.
         """
         self.last_login_refusal = None
         if self.client.refresh_token_value:
@@ -335,7 +337,7 @@ class VerisureHub:
                         "with the kept password",
                         signal,
                     )
-                    await self.client.login()
+                    await self._login_unattended()
                     return
                 _LOGGER.warning("Refresh genuinely rejected: %s", err.log_detail())
                 rejection = err
@@ -348,7 +350,22 @@ class VerisureHub:
                     "Refresh token rejected and no password available; reauth required"
                 )
             _LOGGER.info("Falling back to password login after refresh failure")
+            await self._login_unattended()
+            return
         await self.client.login()
+
+    async def _login_unattended(self) -> None:
+        """Sign in with the client's stored password in place of the saved
+        sign-in, dropping the password if Verisure rejects it.
+
+        Not used for a sign-in with no saved sign-in yet: the setup dialog
+        answers an SMS code request by signing in with the same password.
+        """
+        try:
+            await self.client.login()
+        except VerisureOwaError as err:
+            self.client.forget_rejected_password(err)
+            raise
 
     async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
         """Validate the current device."""

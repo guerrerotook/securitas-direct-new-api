@@ -22,6 +22,7 @@ from custom_components.securitas.verisure_owa_api import (
     AccountBlockedError,
     APIConnectionError,
     AuthenticationError,
+    TwoFactorRequiredError,
     VerisureOwaError,
 )
 from custom_components.securitas.verisure_owa_api.client._base import (
@@ -726,6 +727,75 @@ class TestLogin:
         assert raised.value is refusal
         hub.client.login.assert_not_awaited()
         assert hub.last_login_refusal is None
+
+    @pytest.mark.parametrize(
+        "rejection",
+        [
+            pytest.param(AuthenticationError("wrong password"), id="wrong-password"),
+            pytest.param(AccountBlockedError("blocked"), id="blocked"),
+            pytest.param(TwoFactorRequiredError("sms code"), id="sms-code"),
+        ],
+    )
+    async def test_setup_rejected_kept_password_is_not_tried_again(self, rejection):
+        """Verisure blocks an account after three failed sign-ins: a kept
+        password it rejects at setup is dropped from the (possibly shared)
+        client, so the next login on it makes no sign-in."""
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock(side_effect=rejection)
+
+        with pytest.raises(type(rejection)):
+            await hub.login()
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+
+        with pytest.raises(VerisureOwaError):
+            await hub.login()
+        hub.client.login.assert_awaited_once()
+
+    async def test_setup_kept_password_failing_transiently_is_kept(self):
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock(side_effect=APIConnectionError("reset"))
+
+        with pytest.raises(APIConnectionError):
+            await hub.login()
+        assert hub.client.password == "hunter2"
+        assert hub.client.password_kept is True
+
+    async def test_setup_rejected_password_after_genuine_refresh_rejection_is_dropped(
+        self,
+    ):
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "dead-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        genuine = VerisureOwaError("Invalid session")
+        genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        hub.client.refresh_token = AsyncMock(side_effect=genuine)
+        hub.client.login = AsyncMock(side_effect=AuthenticationError("wrong"))
+
+        with pytest.raises(AuthenticationError):
+            await hub.login()
+        assert hub.client.password == ""
+
+    async def test_plain_password_login_keeps_the_password_when_rejected(self):
+        """The setup dialog's own sign-in (no saved sign-in yet) keeps the
+        password: an SMS code request is answered by signing in again with it."""
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = None
+        hub.client.password = "hunter2"
+        hub.client.login = AsyncMock(side_effect=TwoFactorRequiredError("sms"))
+
+        with pytest.raises(TwoFactorRequiredError):
+            await hub.login()
+        assert hub.client.password == "hunter2"
 
     async def test_last_login_refusal_resets_on_each_login(self):
         hub = make_hub()
