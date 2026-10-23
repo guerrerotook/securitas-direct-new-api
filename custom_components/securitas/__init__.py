@@ -1040,6 +1040,34 @@ def _password_secret_key(username: str) -> str:
     return f"password:{_hashed_issue_id('', username)}"
 
 
+def _account_kept_password(
+    hass: HomeAssistant, username: str, *, removing: ConfigEntry | None = None
+) -> str | None:
+    """The password kept by one of the account's enabled entries, other than
+    ``removing``, that has the box ticked; None when none keeps one."""
+    return next(
+        (
+            entry.data[CONF_PASSWORD]
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry is not removing
+            and entry.disabled_by is None
+            and entry.data.get(CONF_USERNAME) == username
+            and entry.data.get(CONF_KEEP_PASSWORD)
+            and entry.data.get(CONF_PASSWORD)
+        ),
+        None,
+    )
+
+
+def _register_kept_password(hass: HomeAssistant, username: str, kept: str) -> None:
+    """Hide the account's kept password from the log."""
+    log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get("log_filter")
+    if log_filter is not None:
+        log_filter.update_secret(
+            _password_secret_key(username), kept, label="[PASSWORD]"
+        )
+
+
 def _sync_kept_password(
     hass: HomeAssistant,
     username: str,
@@ -1060,25 +1088,11 @@ def _sync_kept_password(
         return
     client = session["hub"].client
     log_filter: SensitiveDataFilter | None = domain_data.get("log_filter")
-    kept = next(
-        (
-            entry.data[CONF_PASSWORD]
-            for entry in hass.config_entries.async_entries(DOMAIN)
-            if entry is not removing
-            and entry.disabled_by is None
-            and entry.data.get(CONF_USERNAME) == username
-            and entry.data.get(CONF_KEEP_PASSWORD)
-            and entry.data.get(CONF_PASSWORD)
-        ),
-        None,
-    )
+    kept = _account_kept_password(hass, username, removing=removing)
     if kept is not None:
         client.password = kept
         client.password_kept = True
-        if log_filter is not None:
-            log_filter.update_secret(
-                _password_secret_key(username), kept, label="[PASSWORD]"
-            )
+        _register_kept_password(hass, username, kept)
     elif client.password_kept or forget_unkept:
         client.password = ""
         client.password_kept = False
@@ -1150,6 +1164,13 @@ async def _get_or_create_session(
                 CONF_PASSWORD: entry.data.get(CONF_PASSWORD, ""),
                 CONF_KEEP_PASSWORD: entry.data.get(CONF_KEEP_PASSWORD, False),
             }
+            # An unticked entry setting up first signs in for the whole
+            # account, so it uses a ticked sibling's password. The hub keeps it
+            # only in memory: it never writes a password to its entry.
+            if (kept := _account_kept_password(hass, username)) is not None:
+                _register_kept_password(hass, username, kept)
+                config[CONF_PASSWORD] = kept
+                config[CONF_KEEP_PASSWORD] = True
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
             _take_session_hold(sessions[username], entry.entry_id)

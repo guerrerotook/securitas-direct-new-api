@@ -5011,6 +5011,119 @@ class TestKeptPasswordSync:
         login.assert_awaited_once()
         self._assert_forgotten_but_ticked(home, office)
 
+    def _dead_token_setup(self, hass, refusal, login):
+        """Patch in real hubs whose stored sign-in Verisure turns down with
+        ``refusal`` and whose password sign-in is ``login``; returns the
+        hubs built and the patches."""
+        log_filter = SensitiveDataFilter()
+        hass.data.setdefault(DOMAIN, {})["log_filter"] = log_filter
+        built: list[VerisureHub] = []
+
+        def build(config, entry, *_args):
+            hub = VerisureHub(config, entry, MagicMock(), hass)
+            hub.client.refresh_token_value = "dead"
+            hub.client.refresh_token = AsyncMock(side_effect=refusal())
+            hub.client.login = login
+            built.append(hub)
+            return hub
+
+        patches = contextlib.ExitStack()
+        patches.enter_context(
+            patch("custom_components.securitas.VerisureHub", side_effect=build)
+        )
+        patches.enter_context(
+            patch("custom_components.securitas.async_get_clientsession")
+        )
+        return log_filter, built, patches
+
+    @staticmethod
+    def _genuine_rejection():
+        err = VerisureOwaError("Invalid session")
+        err.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        return err
+
+    @pytest.mark.parametrize("verdict", ["refused", "rejected"])
+    async def test_unticked_entry_setting_up_first_signs_in_with_a_kept_password(
+        self, hass, verdict
+    ):
+        """After a restart the unticked entry of the account may set up before
+        the ticked one: the shared sign-in still uses the kept password, which
+        is hidden from the log before it is sent and never saved to the
+        unticked entry."""
+        unticked = self._entry(hass, kept=False)
+        ticked = self._entry(hass, kept=True, password="kept-password")
+        refusal = (
+            refresh_token_rejected_error
+            if verdict == "refused"
+            else self._genuine_rejection
+        )
+        sent: list[tuple[str, bool, str]] = []
+
+        async def login():
+            client = built[0].client
+            sent.append(
+                (
+                    client.password,
+                    client.password_kept,
+                    log_filter._redact("kept-password"),
+                )
+            )
+
+        log_filter, built, patches = self._dead_token_setup(
+            hass, refusal, AsyncMock(side_effect=login)
+        )
+        with patches:
+            hub = await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        assert sent == [("kept-password", True, "[PASSWORD]")]
+        hub._persist_refresh_token("rotated")
+        assert unticked.data[CONF_REFRESH_TOKEN] == "rotated"
+        assert CONF_PASSWORD not in unticked.data
+        assert unticked.data[CONF_KEEP_PASSWORD] is False
+        assert ticked.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_kept_password_rejected_for_an_unticked_entry_is_forgotten(
+        self, hass
+    ):
+        unticked = self._entry(hass, kept=False)
+        home, office, other = self._ticked_pair_and_other_account(hass)
+        login = AsyncMock(side_effect=login_rejected_error())
+        _, built, patches = self._dead_token_setup(
+            hass, refresh_token_rejected_error, login
+        )
+
+        with patches, pytest.raises(AuthenticationError):
+            await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        login.assert_awaited_once()
+        self._assert_forgotten_but_ticked(home, office)
+        assert other.data[CONF_PASSWORD] == "other-password"
+        assert built[0].client.password == ""
+        assert CONF_PASSWORD not in unticked.data
+
+    async def test_disabled_and_other_account_entries_lend_no_password(self, hass):
+        unticked = self._entry(hass, kept=False)
+        self._entry(
+            hass,
+            kept=True,
+            password="disabled-password",
+            disabled_by=ConfigEntryDisabler.USER,
+        )
+        other_data = make_config_entry_data(
+            username="other@example.com", password="other-password"
+        )
+        other_data[CONF_KEEP_PASSWORD] = True
+        MockConfigEntry(domain=DOMAIN, data=other_data).add_to_hass(hass)
+        login = AsyncMock()
+        _, built, patches = self._dead_token_setup(hass, self._genuine_rejection, login)
+
+        with patches, pytest.raises(AuthenticationError):
+            await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        login.assert_not_awaited()
+        assert built[0].client.password == ""
+        assert built[0].client.password_kept is False
+
     @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
     async def test_server_fault_at_setup_sign_in_waits_to_retry(self, hass, fault):
         """Setup: a server fault answering the kept-password sign-in after a
