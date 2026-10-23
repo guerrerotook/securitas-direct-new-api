@@ -29,6 +29,10 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 from .conftest import (
     FAKE_JWT,
     FAKE_REFRESH_TOKEN,
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
+    login_rejected_error,
     login_response,
     make_jwt,
     refresh_login_crash_error,
@@ -1183,7 +1187,7 @@ def _genuine_code_rejection() -> VerisureOwaError:
 
 
 _SIGN_IN_REJECTIONS = [
-    pytest.param(lambda: AuthenticationError("wrong password"), id="wrong-password"),
+    pytest.param(login_rejected_error, id="wrong-password"),
     pytest.param(lambda: AccountBlockedError("blocked"), id="blocked"),
     pytest.param(lambda: TwoFactorRequiredError("sms code"), id="sms-code"),
     pytest.param(_genuine_code_rejection, id="err-60067"),
@@ -1273,6 +1277,54 @@ class TestKeptPassword:
             assert all(isinstance(r, VerisureOwaError) for r in results)
         client.login.assert_awaited_once()
 
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    async def test_kept_password_survives_a_server_fault_at_sign_in(
+        self, mock_transport, clock, fault
+    ):
+        """login() raises AuthenticationError for any error reply, a server
+        fault included; only a verdict on the password drops it."""
+        rejected = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_kept_password_rejected=rejected,
+        )
+        del client.login  # the real login
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        mock_transport.execute.return_value = login_error_reply(
+            LOGIN_SERVER_FAULTS[fault]
+        )
+
+        assert isinstance(await _poll(client), AuthenticationError)
+
+        assert client.password == "secret"
+        assert client.password_kept is True
+        rejected.assert_not_called()
+
+    async def test_kept_password_rejected_by_verisure_reply_is_dropped(
+        self, mock_transport, clock
+    ):
+        rejected = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_kept_password_rejected=rejected,
+        )
+        del client.login
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        mock_transport.execute.return_value = login_error_reply(LOGIN_WRONG_PASSWORD)
+
+        assert isinstance(await _poll(client), AuthenticationError)
+
+        assert client.password == ""
+        rejected.assert_called_once_with("secret")
+
     async def test_kept_password_failing_transiently_is_kept(
         self, mock_transport, clock
     ):
@@ -1294,7 +1346,7 @@ class TestKeptPassword:
         """A password held only in memory shares the fallback, and so the rule."""
         client = _token_only_client(mock_transport, password="secret")
         await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
-        client.login = AsyncMock(side_effect=AuthenticationError("wrong password"))
+        client.login = AsyncMock(side_effect=login_rejected_error())
         clock.advance(minutes=5)
 
         assert isinstance(await _poll(client), AuthenticationError)

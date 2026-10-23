@@ -170,6 +170,10 @@ _GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset(
 _REFRESH_REFUSAL_ERROR_CODES: frozenset[str] = frozenset({"4", "7"})
 
 
+# Verisure's resolver crashing on a missing value (#557, #568).
+_NULL_DEREF = "Cannot read properties of undefined"
+
+
 def _first_error(body: object) -> dict[str, Any] | None:
     """Return ``body["errors"][0]`` if it is a dict, else ``None``.
 
@@ -253,9 +257,7 @@ def is_refresh_login_crash(err: VerisureOwaError) -> bool:
     path = first.get("path")
     message = first.get("message")
     on_refresh_login = isinstance(path, list) and "xSRefreshLogin" in path
-    is_null_deref = (
-        isinstance(message, str) and "Cannot read properties of undefined" in message
-    )
+    is_null_deref = isinstance(message, str) and _NULL_DEREF in message
     return on_refresh_login and is_null_deref
 
 
@@ -295,17 +297,46 @@ def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
         return None
     if is_genuine_auth_failure(err):
         return None
-    data = first.get("data")
-    if not isinstance(data, dict):
-        data = {}
-    if first.get("name") == "TimeoutError" or data.get("err") == "TimeoutError":
-        return None
-    if _server_status(data.get("status")):
+    if _is_server_fault(first):
         return None
     code = _error_code(err)
     if code is not None:
         return f"refresh-token rejection (err {code})"
     return "refresh-login error"
+
+
+def is_credential_rejection(err: VerisureOwaError) -> bool:
+    """True when Verisure's reply judged the credentials themselves: a wrong
+    password, a blocked account, or an SMS code required.
+
+    Narrower than ``is_genuine_auth_failure``, which also counts a server
+    fault in a sign-in reply (login() raises any error reply as
+    AuthenticationError) and a sign-in refused locally with no reply. Decides
+    when a stored password must stop being used.
+    """
+    if isinstance(err, (AccountBlockedError, TwoFactorRequiredError)):
+        return True
+    first = _first_error(err.response_body)
+    if first is None or _is_server_fault(first):
+        return False
+    return (
+        isinstance(err, AuthenticationError)
+        or _error_code(err) in _GENUINE_AUTH_ERROR_CODES
+    )
+
+
+def _is_server_fault(first: dict[str, Any]) -> bool:
+    """True when an error reports Verisure's own fault, not a verdict: its
+    timeout reply, a 5xx ``data.status``, or a resolver crash."""
+    data = first.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    if first.get("name") == "TimeoutError" or data.get("err") == "TimeoutError":
+        return True
+    if _server_status(data.get("status")):
+        return True
+    message = first.get("message")
+    return isinstance(message, str) and _NULL_DEREF in message
 
 
 def _server_status(status: object) -> bool:

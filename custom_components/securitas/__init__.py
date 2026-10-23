@@ -1137,6 +1137,13 @@ async def _get_or_create_session(
                         )
                         signed_in = True
         else:
+            # Read again under the lock: an entry that signed in meanwhile may
+            # have had the kept password rejected and removed.
+            config = {
+                **config,
+                CONF_PASSWORD: entry.data.get(CONF_PASSWORD, ""),
+                CONF_KEEP_PASSWORD: entry.data.get(CONF_KEEP_PASSWORD, False),
+            }
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
             _take_session_hold(sessions[username], entry.entry_id)

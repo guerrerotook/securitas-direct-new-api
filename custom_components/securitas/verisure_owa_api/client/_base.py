@@ -31,6 +31,7 @@ from ..exceptions import (
     VerisureOwaError,
     _error_code_from_body,
     dead_refresh_token_signal,
+    is_credential_rejection,
     is_genuine_auth_failure,
     is_refresh_login_crash,
 )
@@ -174,7 +175,7 @@ class _ClientBase:
         on_refresh_token_changed: Callable[[str], None] | None = None,
         on_refresh_refusal_alert: Callable[[bool], None] | None = None,
         on_unreachable_alert: Callable[[bool], None] | None = None,
-        on_kept_password_rejected: Callable[[], None] | None = None,
+        on_kept_password_rejected: Callable[[str], None] | None = None,
     ) -> None:
         # Transport
         self._transport = transport
@@ -236,7 +237,7 @@ class _ClientBase:
         self._unreachable_since: datetime | None = None
         self._unreachable_alert_raised: bool = False
         self._on_unreachable_alert: Callable[[bool], None] | None = on_unreachable_alert
-        self._on_kept_password_rejected: Callable[[], None] | None = (
+        self._on_kept_password_rejected: Callable[[str], None] | None = (
             on_kept_password_rejected
         )
 
@@ -641,18 +642,18 @@ class _ClientBase:
 
         Verisure blocks the account after three failed sign-ins, and every
         coordinator sharing this client would otherwise spend one. The user
-        types the password again when asked to sign in again. A kept password
-        is reported to the host, which stores it.
+        types the password again when asked to sign in again. A rejected kept
+        password is passed to the host, which removes its stored copy.
         """
-        if not is_genuine_auth_failure(err):
+        if not is_credential_rejection(err):
             return
-        was_kept = self.password_kept and bool(self.password)
+        rejected = self.password if self.password_kept else ""
         self.password = ""
         self.password_kept = False
-        if not was_kept or self._on_kept_password_rejected is None:
+        if not rejected or self._on_kept_password_rejected is None:
             return
         try:
-            self._on_kept_password_rejected()
+            self._on_kept_password_rejected(rejected)
         except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.warning("on_kept_password_rejected callback raised", exc_info=True)
 

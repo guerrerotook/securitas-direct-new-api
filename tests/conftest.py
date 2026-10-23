@@ -45,6 +45,7 @@ from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    AuthenticationError,
     VerisureOwaError,
 )
 from custom_components.securitas.verisure_owa_api.http_transport import (
@@ -210,6 +211,41 @@ def refresh_token_rejected_err7_response() -> dict:
         ],
         "data": {"xSRefreshLogin": None},
     }
+
+
+def login_error_reply(error: dict) -> dict:
+    """An ``mkLoginToken`` reply carrying ``error`` and no sign-in."""
+    return {
+        "errors": [{**error, "path": ["xSLoginToken"]}],
+        "data": {"xSLoginToken": None},
+    }
+
+
+LOGIN_WRONG_PASSWORD = {
+    "message": "Invalid user or password",
+    "data": {"res": "ERROR", "err": "60022", "status": 401},
+}
+# Verisure answering a sign-in without judging the password.
+LOGIN_SERVER_FAULTS = {
+    "timeout": {
+        "message": "operation timed out",
+        "name": "TimeoutError",
+        "data": {"err": "TimeoutError"},
+    },
+    "server-error": {
+        "message": "Internal server error",
+        "data": {"res": "ERROR", "err": "500", "status": 500},
+    },
+    "crash": {"message": "Cannot read properties of undefined (reading 'fr')"},
+}
+
+
+def login_rejected_error() -> AuthenticationError:
+    """A wrong password, as login() raises it from Verisure's reply."""
+    body = login_error_reply(LOGIN_WRONG_PASSWORD)
+    err = AuthenticationError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
 
 
 def refresh_token_rejected_err7_error() -> VerisureOwaError:

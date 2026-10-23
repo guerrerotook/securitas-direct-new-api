@@ -96,6 +96,10 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
 from tests.conftest import (
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
+    login_rejected_error,
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
@@ -4814,7 +4818,8 @@ class TestKeptPasswordSync:
         hub.client.password_kept = True
         hub.client.refresh_token_value = "shared"
         hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
-        hub.client.login = AsyncMock(side_effect=login_error)
+        if login_error is not None:
+            hub.client.login = AsyncMock(side_effect=login_error)
         return hub
 
     def _ticked_pair_and_other_account(self, hass):
@@ -4838,7 +4843,7 @@ class TestKeptPasswordSync:
         of the account, so no restart or joining entry tries it again; the box
         stays ticked, so the sign-in that follows keeps the new password."""
         home, office, other = self._ticked_pair_and_other_account(hass)
-        hub = self._refused_hub(hass, home, AuthenticationError("wrong password"))
+        hub = self._refused_hub(hass, home, login_rejected_error())
 
         with pytest.raises(AuthenticationError):
             await hub.client._check_authentication_token()
@@ -4856,6 +4861,82 @@ class TestKeptPasswordSync:
         self._assert_forgotten_but_ticked(home, office)
         assert other.data[CONF_PASSWORD] == "other-password"
 
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    async def test_server_fault_at_sign_in_keeps_the_password_on_disk(
+        self, hass, fault
+    ):
+        """Verisure failing to answer a sign-in is not a verdict on the
+        password: it stays in memory and in the entries."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        # The real login, answered by the transport.
+        hub = self._refused_hub(hass, home, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        )
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        assert hub.client.password == "kept-password"
+        assert home.data[CONF_PASSWORD] == "kept-password"
+        assert office.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_wrong_password_reply_at_sign_in_forgets_it_on_disk(self, hass):
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_WRONG_PASSWORD)
+        )
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        self._assert_forgotten_but_ticked(home, office)
+
+    async def test_only_the_rejected_password_is_forgotten(self, hass):
+        """A password saved meanwhile, say by Reconfigure while an old
+        sign-in was still running, is not the one Verisure rejected."""
+        home = self._entry(hass, kept=True, password="kept-password")
+        office = self._entry(hass, kept=True, password="new-password")
+        hub = self._refused_hub(hass, home, login_rejected_error())
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        self._assert_forgotten_but_ticked(home)
+        assert office.data[CONF_PASSWORD] == "new-password"
+
+    async def test_ticked_entries_setting_up_together_spend_one_sign_in(self, hass):
+        """Each entry's setup reads its data before waiting for the account:
+        the second must not sign in with the copy it read before the first
+        found the password rejected."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hass.data.setdefault(DOMAIN, {})
+        login = AsyncMock(side_effect=login_rejected_error())
+
+        def build(config, entry, *_args):
+            hub = VerisureHub(config, entry, MagicMock(), hass)
+            hub.client.refresh_token_value = "refused"
+            hub.client.refresh_token = AsyncMock(
+                side_effect=refresh_token_rejected_error()
+            )
+            hub.client.login = login
+            return hub
+
+        with (
+            patch("custom_components.securitas.VerisureHub", side_effect=build),
+            patch("custom_components.securitas.async_get_clientsession"),
+        ):
+            results = await asyncio.gather(
+                _get_or_create_session(hass, dict(home.data), home),
+                _get_or_create_session(hass, dict(office.data), office),
+                return_exceptions=True,
+            )
+
+        assert all(isinstance(r, Exception) for r in results)
+        login.assert_awaited_once()
+        self._assert_forgotten_but_ticked(home, office)
+
     async def test_kept_password_failing_transiently_stays_in_the_entries(self, hass):
         home, office, _ = self._ticked_pair_and_other_account(hass)
         hub = self._refused_hub(hass, home, APIConnectionError("reset"))
@@ -4872,7 +4953,7 @@ class TestKeptPasswordSync:
         """The other ticked entry joining the session afterwards brings no
         password, so trying its own token, refused too, makes no sign-in."""
         home, office, _ = self._ticked_pair_and_other_account(hass)
-        hub = self._refused_hub(hass, home, AuthenticationError("wrong password"))
+        hub = self._refused_hub(hass, home, login_rejected_error())
         self._session(hass, hub, home.entry_id)
         with pytest.raises(AuthenticationError):
             await hub.client._check_authentication_token()

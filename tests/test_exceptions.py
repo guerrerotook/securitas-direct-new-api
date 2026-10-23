@@ -22,12 +22,16 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     _error_code_from_body,
     dead_refresh_token_signal,
     is_account_blocked,
+    is_credential_rejection,
     is_genuine_auth_failure,
     is_refresh_login_crash,
     is_refresh_token_rejected,
 )
 
 from .conftest import (
+    LOGIN_SERVER_FAULTS,
+    login_error_reply,
+    login_rejected_error,
     refresh_login_crash_error,
     refresh_timeout_reply_error,
     refresh_token_rejected_err7_error,
@@ -529,3 +533,42 @@ class TestRefusalsNeverAskForReauth:
     )
     def test_refusal_is_not_genuine(self, make_err):
         assert is_genuine_auth_failure(make_err()) is False
+
+
+# ── is_credential_rejection ──────────────────────────────────────────────────
+
+
+def _login_auth_error(error: dict) -> AuthenticationError:
+    body = login_error_reply(error)
+    err = AuthenticationError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
+
+
+class TestIsCredentialRejection:
+    """Only Verisure's verdict on the credentials counts; a server fault that
+    login() also raises as AuthenticationError does not."""
+
+    @pytest.mark.parametrize(
+        "make_error",
+        [
+            pytest.param(login_rejected_error, id="wrong-password"),
+            pytest.param(lambda: AccountBlockedError("blocked"), id="blocked"),
+            pytest.param(lambda: TwoFactorRequiredError("sms code"), id="sms-code"),
+        ],
+    )
+    def test_verdicts(self, make_error):
+        assert is_credential_rejection(make_error()) is True
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    def test_server_faults_are_not_verdicts_but_still_ask_to_sign_in(self, fault):
+        err = _login_auth_error(LOGIN_SERVER_FAULTS[fault])
+        assert is_credential_rejection(err) is False
+        assert is_genuine_auth_failure(err) is True
+
+    def test_raised_locally_without_a_reply_is_not_a_verdict(self):
+        err = AuthenticationError("Cannot login: no password available")
+        assert is_credential_rejection(err) is False
+
+    def test_transient_error_is_not_a_verdict(self):
+        assert is_credential_rejection(APIConnectionError("reset")) is False

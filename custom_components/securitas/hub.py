@@ -772,9 +772,10 @@ class VerisureHub:
         elif self.config_entry is not None:
             clear_unreachable_issue(self.hass, self.client.username)
 
-    def _forget_kept_password(self) -> None:
-        """Remove the password Verisure rejected from every entry of the
-        client's account, so no restart or joining entry tries it again.
+    def _forget_kept_password(self, rejected: str) -> None:
+        """Remove the password Verisure rejected from the entries of the
+        client's account that store it, so no restart or joining entry tries
+        it again. A different password, saved since, stays.
 
         The box stays ticked: the sign-in the user is asked for next keeps the
         new password.
@@ -783,7 +784,7 @@ class VerisureHub:
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             if (
                 entry.data.get(CONF_USERNAME) != username
-                or CONF_PASSWORD not in entry.data
+                or entry.data.get(CONF_PASSWORD) != rejected
             ):
                 continue
             new_data = {**entry.data}

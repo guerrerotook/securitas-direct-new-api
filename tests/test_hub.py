@@ -37,6 +37,7 @@ from custom_components.securitas.verisure_owa_api.models import (
 )
 
 from .conftest import (
+    login_rejected_error,
     make_installation,
     refresh_login_crash_error,
     refresh_token_rejected_err7_error,
@@ -737,7 +738,7 @@ class TestLogin:
     @pytest.mark.parametrize(
         "rejection",
         [
-            pytest.param(AuthenticationError("wrong password"), id="wrong-password"),
+            pytest.param(login_rejected_error(), id="wrong-password"),
             pytest.param(AccountBlockedError("blocked"), id="blocked"),
             pytest.param(TwoFactorRequiredError("sms code"), id="sms-code"),
         ],
@@ -785,7 +786,7 @@ class TestLogin:
         genuine = VerisureOwaError("Invalid session")
         genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
         hub.client.refresh_token = AsyncMock(side_effect=genuine)
-        hub.client.login = AsyncMock(side_effect=AuthenticationError("wrong"))
+        hub.client.login = AsyncMock(side_effect=login_rejected_error())
 
         with pytest.raises(AuthenticationError):
             await hub.login()
