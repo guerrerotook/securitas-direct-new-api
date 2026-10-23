@@ -4804,6 +4804,93 @@ class TestKeptPasswordSync:
         assert hub.client.password == ""
         assert hub.client.password_kept is False
 
+    def _refused_hub(self, hass, holder, login_error):
+        """The account's shared hub: Verisure refuses its saved sign-in and
+        answers a sign-in with the kept password with ``login_error``."""
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = holder
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock(side_effect=login_error)
+        return hub
+
+    def _ticked_pair_and_other_account(self, hass):
+        home = self._entry(hass, kept=True, password="kept-password")
+        office = self._entry(hass, kept=True, password="kept-password")
+        other_data = make_config_entry_data(
+            username="other@example.com", password="other-password"
+        )
+        other_data[CONF_KEEP_PASSWORD] = True
+        other = MockConfigEntry(domain=DOMAIN, data=other_data)
+        other.add_to_hass(hass)
+        return home, office, other
+
+    def _assert_forgotten_but_ticked(self, *entries):
+        for entry in entries:
+            assert CONF_PASSWORD not in entry.data
+            assert entry.data[CONF_KEEP_PASSWORD] is True
+
+    async def test_rejected_kept_password_is_forgotten_by_the_entries(self, hass):
+        """Runtime: the kept password Verisure rejects goes from every entry
+        of the account, so no restart or joining entry tries it again; the box
+        stays ticked, so the sign-in that follows keeps the new password."""
+        home, office, other = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, AuthenticationError("wrong password"))
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        self._assert_forgotten_but_ticked(home, office)
+        assert other.data[CONF_PASSWORD] == "other-password"
+
+    async def test_rejected_kept_password_is_forgotten_at_setup(self, hass):
+        home, office, other = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, None, AccountBlockedError("blocked"))
+
+        with pytest.raises(AccountBlockedError):
+            await hub.login()
+
+        self._assert_forgotten_but_ticked(home, office)
+        assert other.data[CONF_PASSWORD] == "other-password"
+
+    async def test_kept_password_failing_transiently_stays_in_the_entries(self, hass):
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, APIConnectionError("reset"))
+
+        with pytest.raises(APIConnectionError):
+            await hub.client._check_authentication_token()
+
+        assert home.data[CONF_PASSWORD] == "kept-password"
+        assert office.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_ticked_entry_joining_after_a_rejection_does_not_sign_in(
+        self, hass, clock
+    ):
+        """The other ticked entry joining the session afterwards brings no
+        password, so trying its own token, refused too, makes no sign-in."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, AuthenticationError("wrong password"))
+        self._session(hass, hub, home.entry_id)
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+        clock.advance(minutes=15)
+        hub.client.authentication_token_exp = datetime.min
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.refresh_refusals_persisting
+        data = dict(office.data)
+        data[CONF_REFRESH_TOKEN] = "own"
+
+        with pytest.raises(ConfigEntryNotReady):
+            await _get_or_create_session(hass, data, office)
+
+        hub.client.login.assert_awaited_once()
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+
     async def test_plain_unload_and_reload_keep_the_kept_password(self, hass):
         """A reload, or Home Assistant stopping, is not the user saying no:
         the shared client keeps the ticked entry's password, and the log

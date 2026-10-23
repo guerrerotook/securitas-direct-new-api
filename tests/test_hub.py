@@ -104,6 +104,12 @@ class TestConstruction:
         hub = make_hub(mock_client=False, **{CONF_KEEP_PASSWORD: kept})
         assert hub.client.password_kept is kept
 
+    def test_ticked_box_without_a_password_keeps_nothing(self):
+        """The box stays ticked after Verisure rejected the kept password,
+        which was removed: there is nothing to sign in with."""
+        hub = make_hub(mock_client=False, password="", **{CONF_KEEP_PASSWORD: True})
+        assert hub.client.password_kept is False
+
     def test_client_password_not_kept_without_the_flag(self):
         hub = make_hub(mock_client=False)
         assert hub.client.password_kept is False

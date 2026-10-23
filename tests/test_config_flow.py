@@ -6022,6 +6022,24 @@ async def test_reauth_ticking_stores_password(hass):
     assert entry.data[CONF_PASSWORD] == "new-password"
 
 
+async def test_reauth_after_a_rejected_kept_password_keeps_the_new_one(hass):
+    """Verisure rejected the kept password, so it was removed but the box was
+    left ticked: the reauth form shows it ticked, and the new password is
+    kept."""
+    entry = _make_kept_password_entry(hass)
+    data = dict(entry.data)
+    data.pop(CONF_PASSWORD)
+    hass.config_entries.async_update_entry(entry, data=data)
+    result = await _start_reauth_flow(hass, entry)
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is True
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+
+
 async def test_reconfigure_updates_kept_password_on_other_ticked_entries(hass):
     """Another ticked entry on the account takes the password just proven,
     so a password change leaves no stale kept password; its box stays as is."""
@@ -6267,6 +6285,28 @@ async def test_options_untick_removes_password_without_signing_in(hass):
     transport.assert_not_called()
     assert hub.mock_calls == []
     assert hub.client.mock_calls == []
+
+
+async def test_options_untick_with_the_password_already_forgotten(hass):
+    """After Verisure rejected the kept password the box is still ticked
+    with no password: Configure still offers it, and unticking just clears
+    the box."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+    data = dict(entry.data)
+    data.pop(CONF_PASSWORD)
+    hass.config_entries.async_update_entry(entry, data=data)
+    hub.client.password = ""
+    hub.client.password_kept = False
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert _section_inner_keys(result["data_schema"], "sign_in") == {CONF_KEEP_PASSWORD}
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+    await _finish_options(hass, result)
+
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+    assert hub.client.password == ""
 
 
 async def test_options_untick_then_abandon_keeps_password(hass):

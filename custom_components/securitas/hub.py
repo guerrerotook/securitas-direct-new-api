@@ -264,7 +264,11 @@ class VerisureHub:
             language=self.lang,
             username=domain_config[CONF_USERNAME],
             password=domain_config.get(CONF_PASSWORD, ""),
-            password_kept=bool(domain_config.get(CONF_KEEP_PASSWORD)),
+            # The box stays ticked after a rejected kept password is removed.
+            password_kept=bool(
+                domain_config.get(CONF_KEEP_PASSWORD)
+                and domain_config.get(CONF_PASSWORD)
+            ),
             device_id=domain_config[CONF_DEVICE_ID],
             uuid=domain_config[CONF_UNIQUE_ID],
             id_device_indigitall=domain_config[CONF_DEVICE_INDIGITALL],
@@ -277,6 +281,7 @@ class VerisureHub:
             on_refresh_token_changed=self._persist_refresh_token,
             on_refresh_refusal_alert=self._refresh_refusal_alert,
             on_unreachable_alert=self._unreachable_alert,
+            on_kept_password_rejected=self._forget_kept_password,
         )
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
@@ -766,6 +771,28 @@ class VerisureHub:
             self.raise_unreachable_notice()
         elif self.config_entry is not None:
             clear_unreachable_issue(self.hass, self.client.username)
+
+    def _forget_kept_password(self) -> None:
+        """Remove the password Verisure rejected from every entry of the
+        client's account, so no restart or joining entry tries it again.
+
+        The box stays ticked: the sign-in the user is asked for next keeps the
+        new password.
+        """
+        username = self.client.username
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if (
+                entry.data.get(CONF_USERNAME) != username
+                or CONF_PASSWORD not in entry.data
+            ):
+                continue
+            new_data = {**entry.data}
+            new_data.pop(CONF_PASSWORD)
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+        _LOGGER.warning(
+            "Verisure rejected the kept password; it is no longer stored. Sign "
+            "in again to keep a new one"
+        )
 
     def raise_unreachable_notice(self) -> None:
         """Raise the "can't reach Verisure" issue, unless no entry uses the

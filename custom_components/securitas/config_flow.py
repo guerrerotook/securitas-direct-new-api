@@ -1020,8 +1020,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self, username: str, entries: Iterable[config_entries.ConfigEntry]
     ) -> None:
         """Reload ``entries`` onto the session this dialog just registered."""
-        # This sign-in proves the new token; crashes or err 4 or err 7
-        # refusals of the one it replaces must not count against it, and
+        # This sign-in proves the new token; refusals of the one it replaces
+        # must not count against it, nor failures to reach Verisure, and
         # there is nothing left to sign in again (the reload sets nothing
         # up for a disabled entry).
         _clear_setup_refresh_refusals(self.hass, username)

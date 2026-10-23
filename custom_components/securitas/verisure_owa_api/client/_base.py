@@ -174,6 +174,7 @@ class _ClientBase:
         on_refresh_token_changed: Callable[[str], None] | None = None,
         on_refresh_refusal_alert: Callable[[bool], None] | None = None,
         on_unreachable_alert: Callable[[bool], None] | None = None,
+        on_kept_password_rejected: Callable[[], None] | None = None,
     ) -> None:
         # Transport
         self._transport = transport
@@ -235,6 +236,9 @@ class _ClientBase:
         self._unreachable_since: datetime | None = None
         self._unreachable_alert_raised: bool = False
         self._on_unreachable_alert: Callable[[bool], None] | None = on_unreachable_alert
+        self._on_kept_password_rejected: Callable[[], None] | None = (
+            on_kept_password_rejected
+        )
 
         # Device configuration
         self.device_id: str = device_id
@@ -637,11 +641,20 @@ class _ClientBase:
 
         Verisure blocks the account after three failed sign-ins, and every
         coordinator sharing this client would otherwise spend one. The user
-        types the password again when asked to sign in again.
+        types the password again when asked to sign in again. A kept password
+        is reported to the host, which stores it.
         """
-        if is_genuine_auth_failure(err):
-            self.password = ""
-            self.password_kept = False
+        if not is_genuine_auth_failure(err):
+            return
+        was_kept = self.password_kept and bool(self.password)
+        self.password = ""
+        self.password_kept = False
+        if not was_kept or self._on_kept_password_rejected is None:
+            return
+        try:
+            self._on_kept_password_rejected()
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning("on_kept_password_rejected callback raised", exc_info=True)
 
     def _pace_refused_renewal(self) -> None:
         """Raise without contacting Verisure while refusals are paced: once
