@@ -4220,6 +4220,31 @@ class TestSetupUnreachable:
             await self._attempt(hass, entry, mock_hub)
         assert _unreachable_issues(hass) == {}
 
+    async def test_setup_unreachable_notice_is_logged_once(
+        self, hass, mock_hub, clock, caplog
+    ):
+        mock_hub.login = AsyncMock(side_effect=APIConnectionError("timeout"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
+            for minutes in (0, 59, 1, 10, 10):
+                clock.advance(minutes=minutes)
+                with pytest.raises(ConfigEntryNotReady):
+                    await self._attempt(hass, entry, mock_hub)
+
+        alerts = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelname == "WARNING"
+            and "No request to Verisure has worked" in r.getMessage()
+        ]
+        assert alerts == [
+            "No request to Verisure has worked for 60 minutes. The integration "
+            "keeps trying; check that the Verisure app works and that Home "
+            "Assistant is online."
+        ]
+
     async def test_session_handed_back_clears_the_unreachable_notice(
         self, hass, mock_hub, clock
     ):

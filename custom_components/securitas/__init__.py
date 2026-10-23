@@ -705,6 +705,12 @@ def _note_setup_unreachable(hass: HomeAssistant, username: str) -> None:
         return
     period["alerted"] = True
     raise_unreachable_issue(hass, username)
+    _LOGGER.warning(
+        "No request to Verisure has worked for %d minutes. The integration "
+        "keeps trying; check that the Verisure app works and that Home "
+        "Assistant is online.",
+        int((now - period["since"]).total_seconds() // 60),
+    )
 
 
 def _clear_setup_unreachable(hass: HomeAssistant, username: str) -> None:
