@@ -3802,8 +3802,8 @@ _ALERT_LOG = "Verisure has refused to renew the saved sign-in"
 
 class TestSetupRefreshRefusals:
     """Verisure refusing the stored token at setup (any error Verisure answers
-    on xSRefreshLogin, such as err 4, err 7 or the #568 crash) is retried for as long as it lasts, never turned into
-    a reauth prompt.
+    on xSRefreshLogin, such as err 4, err 7 or the #568 crash) is retried for
+    as long as it lasts, never turned into a reauth prompt.
 
     Once refusals have lasted 15 minutes a Repairs notice says how to sign in
     again. The tracking is per account and lives in hass.data, because each
@@ -4939,9 +4939,9 @@ class TestKeptPasswordSync:
     async def test_rejection_answered_after_a_new_password_arrived_spares_it(
         self, hass
     ):
-        """Reconfigure saving a new password while a sign-in with the old one
-        waits for its answer: the rejection is of the old one, so the new one
-        stays in the client and in its entry."""
+        """Another entry's kept password put in place while a sign-in with the
+        old one waits for its answer: the rejection is of the old one, so the
+        new one stays in the client and in its entry."""
         home = self._entry(hass, kept=True, password="old-password")
         office = self._entry(hass, kept=True, password="new-password")
         hub = self._refused_hub(hass, home, None)

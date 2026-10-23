@@ -70,12 +70,13 @@ def _format_graphql_error(
 
 def _is_unusable_reply(response: object) -> bool:
     """True for a reply that carries no data value at all, with or without
-    errors (in list or dict form).
+    errors (in list or dict form), or that is not an object.
 
-    No operation can use one: every typed envelope requires its field, the
-    raw readers raise on a null one, and get_services treats a null catalog
-    as "retry next poll". A genuine credential rejection is excluded:
-    Verisure was reached and answered.
+    No typed envelope accepts one, and the readers that do take one
+    (get_services' empty catalog, validate_device's SMS-code challenge,
+    logout) learn nothing from it about Verisure working. An account-blocked
+    (60052) or invalid-session (60067) reply is excluded: Verisure was
+    reached and answered.
     """
     if not isinstance(response, dict):
         return True

@@ -32,10 +32,11 @@ class _AuthMixin(_ClientBase):
         """Login to the Verisure OWA API and set auth tokens.
 
         Once a refresh token has been minted, a password the user did not
-        choose to keep is scrubbed from storage. Sending an empty password to the API only earns a
-        credential error and burns an attempt toward Verisure's 3-strikes
-        account lock, so refuse it here and signal reauth instead — this guards
-        every fallback path that reaches login() after a rejected refresh (#499).
+        choose to keep is scrubbed from storage. Sending an empty password to
+        the API only earns a credential error and burns an attempt toward
+        Verisure's 3-strikes account lock, so refuse it here and signal reauth
+        instead — this guards every fallback path that reaches login() after a
+        rejected refresh (#499).
         """
         if not self.password:
             raise AuthenticationError(
