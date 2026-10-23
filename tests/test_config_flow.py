@@ -5847,6 +5847,66 @@ async def test_reconfigure_leaves_other_unticked_entries_without_password(hass):
     assert home.data[CONF_PASSWORD] == "new-password"
 
 
+async def test_a_failed_sign_in_keeps_the_choice_just_made(hass):
+    """Unticking, then typing a wrong password, shows the box still unticked,
+    and the following correct sign-in stores no password."""
+    entry = _make_kept_password_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    hub.login.side_effect = AuthenticationError("bad credentials")
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], hub, password="wrong", keep_password=False
+    )
+
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is False
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=False
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+
+
+async def test_reauth_ticking_through_a_text_message_code_stores_password(hass):
+    """A ticked reauth that needs a text-message code stores the password."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+    mock_hub = _hub_factory(two_fa=True)
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+                CONF_KEEP_PASSWORD: True,
+            },
+        )
+        assert result["step_id"] == "phone_list"
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={"phones": "0_555-1234"}
+        )
+        assert result["step_id"] == "otp_challenge"
+    with (
+        _patches(mock_hub),
+        patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
 async def test_reconfigure_with_a_wrong_password_asks_again(hass):
     """A rejected password shows the form again and leaves the entry unchanged."""
     entry = _make_reauth_entry(hass)

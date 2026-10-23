@@ -854,7 +854,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         assert self._reauth_entry is not None
         username = self._reauth_entry.data.get(CONF_USERNAME, "")
-        keep_password = bool(self._reauth_entry.data.get(CONF_KEEP_PASSWORD, False))
+        # Starts as the entry's choice; after a failed submission, the one just made.
+        keep_password = bool(self.config.get(CONF_KEEP_PASSWORD, False))
         return self.async_show_form(
             step_id=(
                 "reconfigure"
