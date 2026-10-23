@@ -2,6 +2,8 @@
 
 import logging
 
+import pytest
+
 from custom_components.securitas.log_filter import (
     SensitiveDataFilter,
     TransientCoordinatorErrorFilter,
@@ -174,6 +176,21 @@ def test_two_accounts_passwords_both_redacted():
     )
     f.filter(record)
     assert record.msg == "[PASSWORD] and [PASSWORD]"
+
+
+@pytest.mark.parametrize("replacement", [None, "new-secret"])
+def test_shared_value_stays_redacted_while_another_key_holds_it(replacement):
+    """Two accounts with the same password: clearing or changing one account's
+    leaves the other's redacted."""
+    f = SensitiveDataFilter()
+    f.update_secret("password:aaaaaaaaaaaa", "same-secret", label="[PASSWORD]")
+    f.update_secret("password:bbbbbbbbbbbb", "same-secret", label="[PASSWORD]")
+
+    f.update_secret("password:aaaaaaaaaaaa", replacement, label="[PASSWORD]")
+
+    assert f._redact("same-secret") == "[PASSWORD]"
+    f.update_secret("password:bbbbbbbbbbbb", None)
+    assert f._redact("same-secret") == "same-secret"
 
 
 def test_filter_always_returns_true():

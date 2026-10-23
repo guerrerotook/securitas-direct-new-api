@@ -80,9 +80,10 @@ class SensitiveDataFilter(logging.Filter):
         ``label`` replaces the label looked up from ``key``, for keys that carry
         a per-account suffix the log must not show.
         """
-        # Remove old value for this key if it exists
         old = self._keys.pop(key, None)
-        if old and old in self._secrets:
+        # Two accounts may share a password: the value stays while another key
+        # still holds it.
+        if old and old in self._secrets and old not in self._keys.values():
             del self._secrets[old]
 
         if not value:
