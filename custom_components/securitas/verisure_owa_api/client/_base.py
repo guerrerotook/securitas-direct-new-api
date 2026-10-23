@@ -71,11 +71,12 @@ def _is_unusable_reply(response: object) -> bool:
     """True for a reply that carries no data value at all, with or without
     errors (in list or dict form), or that is not an object.
 
-    No typed envelope accepts one, and the readers that do take one
-    (get_services' empty catalog, validate_device's SMS-code challenge,
-    logout) learn nothing from it about Verisure working. An account-blocked
-    (60052) or invalid-session (60067) reply is excluded: Verisure was
-    reached and answered.
+    No typed envelope accepts one. Some raw readers still act on one
+    (get_services returns an empty catalog, validate_device returns the
+    SMS-code challenge, login turns a wrong-password reply into
+    AuthenticationError, logout ignores the reply), and each still counts
+    here as a failure. Only an account-blocked (60052) or invalid-session
+    (60067) reply is excluded.
     """
     if not isinstance(response, dict):
         return True
@@ -894,8 +895,9 @@ class _ClientBase:
         without spamming healthy installations, where the noisy per-rotation
         lines stay on DEBUG.
         """
-        # A crash that also carries a server fault or err 60067 is not a
-        # refusal, so the Repairs notice this warning promises never comes.
+        # A crash that also carries a server fault or a genuine credential
+        # failure (err 60052 or 60067) is not a refusal, so the Repairs notice
+        # this warning promises never comes.
         if (
             self._refresh_crash_reported
             or dead_refresh_token_signal(err) != "refresh-login crash"

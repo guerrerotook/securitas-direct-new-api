@@ -308,9 +308,9 @@ class TestRefreshCrashRecruitmentWarning:
     async def test_crash_that_is_not_a_refusal_does_not_recruit(
         self, mock_transport, caplog, extra
     ) -> None:
-        """A crash that also carries a server fault or err 60067 is not
-        Verisure refusing the saved sign-in, so no Repairs notice will follow:
-        the warning, which promises one, stays silent."""
+        """A crash that also carries a server fault or a genuine credential
+        failure is not Verisure refusing the saved sign-in, so no Repairs notice
+        will follow: the warning, which promises one, stays silent."""
         response = refresh_crash_response()
         response["errors"][0].update(extra)
         mock_transport.execute.return_value = response
