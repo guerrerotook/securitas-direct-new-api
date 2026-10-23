@@ -635,7 +635,9 @@ class TestAlarmCoordinator:
         client.get_general_status.side_effect = SessionExpiredError("expired")
         client.login.side_effect = rejected_after_swap
 
-        coord = self._make_coordinator(hass, client, _make_queue(), _make_installation())
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
         with pytest.raises(ConfigEntryAuthFailed):
             await coord._async_update_data()
         client.forget_rejected_password.assert_called_once_with(

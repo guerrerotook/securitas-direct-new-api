@@ -506,9 +506,7 @@ class TestDeadRefreshTokenSignal:
             pytest.param({"data": {"err": "60067"}}, id="err-60067"),
         ],
     )
-    def test_crash_that_also_says_server_fault_or_genuine_is_not_a_refusal(
-        self, extra
-    ):
+    def test_crash_that_also_says_server_fault_or_genuine_is_not_a_refusal(self, extra):
         """The crash message does not outrank what the rest of the error
         says: a 5xx status or Verisure's timeout reply is a server fault, and
         60067 is a genuine rejection."""
