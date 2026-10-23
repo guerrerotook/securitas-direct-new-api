@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_PASSWORD,
@@ -75,10 +76,12 @@ from custom_components.securitas import (
 from custom_components.securitas.const import API_CACHE_TTL, CONF_KEEP_PASSWORD
 from custom_components.securitas.hub import (
     _async_notify,
+    _hashed_issue_id,
     _notify,
     raise_renewal_refused_issue,
     raise_unreachable_issue,
 )
+from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
 from custom_components.securitas.verisure_owa_api.client import _base as client_base
 from custom_components.securitas.verisure_owa_api.const import (
@@ -4619,3 +4622,145 @@ class TestCoTenantStoredTokenRecovery:
 
         assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
         assert entry.data[CONF_REFRESH_TOKEN] == "own"
+
+
+class TestKeptPasswordSync:
+    """The account's shared client uses a kept password only while one of the
+    account's enabled entries has the box ticked."""
+
+    USERNAME = "test@example.com"
+
+    def _entry(self, hass, *, kept, password="test-password", **kwargs):
+        data = make_config_entry_data(password=password)
+        data[CONF_KEEP_PASSWORD] = kept
+        if not kept:
+            data.pop(CONF_PASSWORD, None)
+        entry = MockConfigEntry(domain=DOMAIN, data=data, **kwargs)
+        entry.add_to_hass(hass)
+        return entry
+
+    def _session(self, hass, hub, *holders):
+        session = _new_session_record(hub)
+        session["holders"].update(holders)
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[self.USERNAME] = (
+            session
+        )
+        log_filter = SensitiveDataFilter()
+        hass.data[DOMAIN]["log_filter"] = log_filter
+        return log_filter
+
+    def _register(self, log_filter, password):
+        log_filter.update_secret(
+            f"password:{_hashed_issue_id('', self.USERNAME)}",
+            password,
+            label="[PASSWORD]",
+        )
+
+    async def test_ticked_entry_joining_a_refused_session_signs_in_with_its_password(
+        self, hass, clock
+    ):
+        holder = self._entry(hass, kept=False)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = holder
+        hub.client.password = ""
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock()
+        self._session(hass, hub, holder.entry_id)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        clock.advance(minutes=15)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.refresh_refusals_persisting
+
+        joining = self._entry(hass, kept=True, password="joiner-password")
+        data = dict(joining.data)
+        data[CONF_REFRESH_TOKEN] = "own"
+
+        session = await _get_or_create_session(hass, data, joining)
+
+        assert session is hub
+        hub.client.login.assert_awaited_once()
+        assert hub.client.password == "joiner-password"
+        assert hub.client.password_kept is True
+
+    @pytest.mark.parametrize("joins", [True, False])
+    async def test_sync_takes_password_from_ticked_entry_on_join(self, hass, joins):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        self._entry(hass, kept=True, password="kept-password")
+        if joins:
+            log_filter = self._session(hass, hub, "unticked-entry-id")
+        else:
+            hass.data.setdefault(DOMAIN, {})["log_filter"] = SensitiveDataFilter()
+            log_filter = hass.data[DOMAIN]["log_filter"]
+        unticked = self._entry(hass, kept=False)
+
+        with (
+            _patch_hub(hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+        ):
+            await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        assert hub.client.password == "kept-password"
+        assert hub.client.password_kept is True
+        assert log_filter._redact("kept-password") == "[PASSWORD]"
+
+    async def test_sync_clears_password_when_last_ticked_entry_goes(self, hass):
+        hub = make_securitas_hub_mock()
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        unticked = self._entry(hass, kept=False)
+        ticked = self._entry(hass, kept=True, password="kept-password")
+        log_filter = self._session(hass, hub, unticked.entry_id, ticked.entry_id)
+        self._register(log_filter, "kept-password")
+
+        await async_remove_entry(hass, ticked)
+
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+        assert log_filter._redact("kept-password") == "kept-password"
+
+    async def test_sync_ignores_disabled_entries(self, hass):
+        hub = make_securitas_hub_mock()
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        unticked = self._entry(hass, kept=False)
+        self._entry(
+            hass,
+            kept=True,
+            password="other-kept-password",
+            disabled_by=ConfigEntryDisabler.USER,
+        )
+        disabling = self._entry(hass, kept=True, password="kept-password")
+        log_filter = self._session(hass, hub, unticked.entry_id, disabling.entry_id)
+        self._register(log_filter, "kept-password")
+        hass.data[DOMAIN][disabling.entry_id] = {"hub": hub, "devices": []}
+        # ConfigEntry blocks plain attribute assignment.
+        object.__setattr__(disabling, "disabled_by", ConfigEntryDisabler.USER)
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            assert await async_unload_entry(hass, disabling) is True
+
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+
+    async def test_sync_leaves_in_memory_password_alone(self, hass):
+        hub = make_securitas_hub_mock()
+        hub.client.password = "just-typed"
+        hub.client.password_kept = False
+        holder = self._entry(hass, kept=False)
+        self._session(hass, hub, holder.entry_id)
+        joining = self._entry(hass, kept=False)
+
+        await _get_or_create_session(hass, dict(joining.data), joining)
+
+        assert hub.client.password == "just-typed"
+        assert hub.client.password_kept is False

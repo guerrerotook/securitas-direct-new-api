@@ -5830,6 +5830,42 @@ async def test_reconfigure_updates_kept_password_on_other_ticked_entries(hass):
     assert CONF_PASSWORD not in home.data
 
 
+async def test_untick_in_reconfigure_stops_using_password(hass):
+    """Unticking in Reconfigure drops the password from the account's client
+    at once, the one just typed included."""
+    entry = _make_kept_password_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    # The real hub's client holds the password the dialog signed in with.
+    hub.client.password = "new-password"
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, keep_password=False)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert hub.client.password == ""
+    assert hub.client.password_kept is False
+
+
+async def test_untick_in_reconfigure_keeps_other_ticked_entrys_password(hass):
+    """Unticking one entry leaves the client with the password another
+    ticked entry on the account still keeps."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    hass.config_entries.async_update_entry(
+        office,
+        data={**office.data, CONF_KEEP_PASSWORD: True, CONF_PASSWORD: "old"},
+    )
+    result = await _start_reconfigure_flow(hass, home)
+    hub = _hub_factory()
+    hub.client.password = "new-password"
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, keep_password=False)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert hub.client.password == "new-password"
+    assert hub.client.password_kept is True
+
+
 async def test_reconfigure_leaves_other_unticked_entries_without_password(hass):
     """Ticking the box on one entry does not tick it, or store the password,
     on the account's other entries."""

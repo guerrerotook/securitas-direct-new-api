@@ -80,6 +80,7 @@ from . import (
     _replace_account_session,
     _resolve_flow_capabilities,
     _store_installations_cache,
+    _sync_kept_password,
     _take_session_hold,
     _unique_id_for,
     generate_uuid,
@@ -949,6 +950,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     else:
                         new_data.pop(CONF_PASSWORD, None)
                     self.hass.config_entries.async_update_entry(entry, data=new_data)
+                # Unticked, the user said no: the password just typed goes too.
+                _sync_kept_password(
+                    self.hass,
+                    username,
+                    forget_unkept=not self.config.get(CONF_KEEP_PASSWORD),
+                )
                 self._overtake_sign_ins_in_flight(username)
             # Home Assistant before 2025.5 leaves the entry's reauth dialog open
             # through the reload; submitted later, it would replace this sign-in.

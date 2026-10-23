@@ -1025,6 +1025,58 @@ async def _sign_in_with_adopted_token(
         raise
 
 
+def _password_secret_key(username: str) -> str:
+    """The log filter's key for an account's password: one per account, so
+    registering one account's password never unregisters another's."""
+    return f"password:{_hashed_issue_id('', username)}"
+
+
+def _sync_kept_password(
+    hass: HomeAssistant,
+    username: str,
+    *,
+    removing: ConfigEntry | None = None,
+    forget_unkept: bool = False,
+) -> None:
+    """Give the account's shared client a kept password while one of the
+    account's enabled entries, other than ``removing``, has the box ticked.
+
+    Otherwise a kept password is dropped, and so is a password held only in
+    memory when ``forget_unkept`` is set (the user just said no); without it,
+    an in-memory password is left for the client's usual fallback.
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    session = domain_data.get("sessions", {}).get(username)
+    if session is None:
+        return
+    client = session["hub"].client
+    log_filter: SensitiveDataFilter | None = domain_data.get("log_filter")
+    kept = next(
+        (
+            entry.data[CONF_PASSWORD]
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry is not removing
+            and entry.disabled_by is None
+            and entry.data.get(CONF_USERNAME) == username
+            and entry.data.get(CONF_KEEP_PASSWORD)
+            and entry.data.get(CONF_PASSWORD)
+        ),
+        None,
+    )
+    if kept is not None:
+        client.password = kept
+        client.password_kept = True
+        if log_filter is not None:
+            log_filter.update_secret(
+                _password_secret_key(username), kept, label="[PASSWORD]"
+            )
+    elif client.password_kept or forget_unkept:
+        client.password = ""
+        client.password_kept = False
+        if log_filter is not None:
+            log_filter.update_secret(_password_secret_key(username), None)
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -1058,6 +1110,8 @@ async def _get_or_create_session(
             # the meantime would otherwise unregister it as held by nobody.
             _take_session_hold(session, entry.entry_id)
             client: VerisureHub = session["hub"]
+            # Before the adoption below, which may need this entry's password.
+            _sync_kept_password(hass, username)
             # The config-flow hub is built before the ConfigEntry exists, so it
             # starts detached (config_entry=None) and is registered in
             # ``sessions`` by the flow. When HA then sets up the freshly-created
@@ -1083,6 +1137,7 @@ async def _get_or_create_session(
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
             _take_session_hold(sessions[username], entry.entry_id)
+            _sync_kept_password(hass, username)
             signed_in = True
 
     # Any session handed back ends the setup refusal period, even a reused one
@@ -1692,7 +1747,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # One key per account: a shared key would unregister the previous
         # account's password.
         log_filter.update_secret(
-            f"password:{_hashed_issue_id('', config[CONF_USERNAME])}",
+            _password_secret_key(config[CONF_USERNAME]),
             config[CONF_PASSWORD],
             label="[PASSWORD]",
         )
@@ -2106,6 +2161,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
+    # By the account, not the hold: unloading has usually released it already.
+    _sync_kept_password(hass, entry.data.get(CONF_USERNAME, ""), removing=entry)
     sessions = domain_data.get("sessions", {})
     username = _held_session_username(sessions, entry)
     if username is not None:
@@ -2121,6 +2178,13 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     """Unload a config entry."""
     if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
         return False
+
+    # A plain unload (a reload, or Home Assistant stopping) keeps the entry's
+    # kept password in use; disabling it stops it.
+    if config_entry.disabled_by:
+        _sync_kept_password(
+            hass, config_entry.data.get(CONF_USERNAME, ""), removing=config_entry
+        )
 
     # Release this entry's hold (under the same lock used for creation)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
