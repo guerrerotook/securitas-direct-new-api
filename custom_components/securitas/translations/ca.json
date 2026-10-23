@@ -29,7 +29,7 @@
                     "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
                 },
                 "data_description": {
-                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que es pot cancel·lar i només serveix per a Verisure."
+                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que no és la vostra contrasenya i, per tant, no serveix de res enlloc més on feu servir aquesta contrasenya."
                 }
             },
             "reconfigure": {
@@ -41,7 +41,7 @@
                     "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
                 },
                 "data_description": {
-                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que es pot cancel·lar i només serveix per a Verisure."
+                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que no és la vostra contrasenya i, per tant, no serveix de res enlloc més on feu servir aquesta contrasenya."
                 }
             },
             "user": {
@@ -52,7 +52,7 @@
                     "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
                 },
                 "data_description": {
-                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que es pot cancel·lar i només serveix per a Verisure."
+                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que no és la vostra contrasenya i, per tant, no serveix de res enlloc més on feu servir aquesta contrasenya."
                 },
                 "description": "Inicia la sessió a Verisure.",
                 "title": "Inici de sessió"

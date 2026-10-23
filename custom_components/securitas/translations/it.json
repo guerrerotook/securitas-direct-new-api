@@ -29,7 +29,7 @@
                     "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
                 },
                 "data_description": {
-                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che può essere revocato e funziona solo per Verisure."
+                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che non è la tua password e quindi non serve a nulla altrove dove usi quella password."
                 }
             },
             "reconfigure": {
@@ -41,7 +41,7 @@
                     "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
                 },
                 "data_description": {
-                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che può essere revocato e funziona solo per Verisure."
+                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che non è la tua password e quindi non serve a nulla altrove dove usi quella password."
                 }
             },
             "user": {
@@ -52,7 +52,7 @@
                     "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
                 },
                 "data_description": {
-                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che può essere revocato e funziona solo per Verisure."
+                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che non è la tua password e quindi non serve a nulla altrove dove usi quella password."
                 },
                 "description": "Accedi a Verisure.",
                 "title": "Accesso"

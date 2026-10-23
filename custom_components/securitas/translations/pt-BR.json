@@ -29,7 +29,7 @@
                     "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
                 },
                 "data_description": {
-                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que pode ser cancelado e só funciona para a Verisure."
+                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que não é a sua senha e, portanto, não serve para nada em outros lugares onde você usa essa senha."
                 }
             },
             "reconfigure": {
@@ -41,7 +41,7 @@
                     "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
                 },
                 "data_description": {
-                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que pode ser cancelado e só funciona para a Verisure."
+                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que não é a sua senha e, portanto, não serve para nada em outros lugares onde você usa essa senha."
                 }
             },
             "user": {
@@ -52,7 +52,7 @@
                     "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
                 },
                 "data_description": {
-                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que pode ser cancelado e só funciona para a Verisure."
+                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que não é a sua senha e, portanto, não serve para nada em outros lugares onde você usa essa senha."
                 },
                 "description": "Fazer login na Verisure.",
                 "title": "Login"

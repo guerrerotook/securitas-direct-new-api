@@ -29,7 +29,7 @@
                     "keep_password": "Keep my password so the integration can sign in again by itself"
                 },
                 "data_description": {
-                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which can be cancelled and works only for Verisure."
+                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which is not your password and so is no use anywhere else you use that password."
                 }
             },
             "reconfigure": {
@@ -41,7 +41,7 @@
                     "keep_password": "Keep my password so the integration can sign in again by itself"
                 },
                 "data_description": {
-                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which can be cancelled and works only for Verisure."
+                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which is not your password and so is no use anywhere else you use that password."
                 }
             },
             "user": {
@@ -52,7 +52,7 @@
                     "keep_password": "Keep my password so the integration can sign in again by itself"
                 },
                 "data_description": {
-                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which can be cancelled and works only for Verisure."
+                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which is not your password and so is no use anywhere else you use that password."
                 },
                 "description": "Login into Verisure.",
                 "title": "Login"
