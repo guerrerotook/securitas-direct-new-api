@@ -148,6 +148,16 @@
                             "enable_activity_polling": "Consulta el registre d'activitat un cop per minut en segon pla (per a automatitzacions per esdeveniments)"
                         }
                     },
+                    "sign_in": {
+                        "name": "Inici de sessió",
+                        "description": "La vostra contrasenya es desa als fitxers de configuració de Home Assistant perquè la integració pugui tornar a iniciar la sessió per si sola.",
+                        "data": {
+                            "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
+                        },
+                        "data_description": {
+                            "keep_password": "Desmarqueu-ho i deseu per esborrar la contrasenya desada a l'instant, sense iniciar la sessió. Per tornar a desar la contrasenya, feu servir Reconfigura, on l'escriviu."
+                        }
+                    },
                     "advanced": {
                         "name": "Avançat",
                         "data": {

@@ -148,6 +148,16 @@
                             "enable_activity_polling": "Interroga il registro attività una volta al minuto in background (per le automazioni basate su eventi)"
                         }
                     },
+                    "sign_in": {
+                        "name": "Accesso",
+                        "description": "La tua password è conservata nei file di configurazione di Home Assistant così l'integrazione può accedere di nuovo da sola.",
+                        "data": {
+                            "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
+                        },
+                        "data_description": {
+                            "keep_password": "Deseleziona e salva per eliminare subito la password conservata, senza accedere. Per conservare di nuovo la password, usa Riconfigura, dove la digiti."
+                        }
+                    },
                     "advanced": {
                         "name": "Avanzato",
                         "data": {

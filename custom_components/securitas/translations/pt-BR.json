@@ -148,6 +148,16 @@
                             "enable_activity_polling": "Consultar o registro de atividade uma vez por minuto em segundo plano (para automações por eventos)"
                         }
                     },
+                    "sign_in": {
+                        "name": "Login",
+                        "description": "Sua senha está guardada nos arquivos de configuração do Home Assistant para que a integração possa fazer login de novo sozinha.",
+                        "data": {
+                            "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
+                        },
+                        "data_description": {
+                            "keep_password": "Desmarque e salve para apagar na hora a senha guardada, sem fazer login. Para guardar sua senha de novo, use Reconfigurar, onde você a digita."
+                        }
+                    },
                     "advanced": {
                         "name": "Avançado",
                         "data": {

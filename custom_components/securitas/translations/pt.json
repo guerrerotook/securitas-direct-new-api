@@ -148,6 +148,16 @@
                             "enable_activity_polling": "Consultar o registo de atividade uma vez por minuto em segundo plano (para automações por eventos)"
                         }
                     },
+                    "sign_in": {
+                        "name": "Início de sessão",
+                        "description": "A sua palavra-passe está guardada nos ficheiros de configuração do Home Assistant para que a integração possa voltar a iniciar sessão sozinha.",
+                        "data": {
+                            "keep_password": "Guardar a minha palavra-passe para que a integração possa voltar a iniciar sessão sozinha"
+                        },
+                        "data_description": {
+                            "keep_password": "Desmarque e guarde para apagar de imediato a palavra-passe guardada, sem iniciar sessão. Para voltar a guardar a palavra-passe, use Reconfigurar, onde a escreve."
+                        }
+                    },
                     "advanced": {
                         "name": "Avançado",
                         "data": {

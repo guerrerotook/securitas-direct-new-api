@@ -83,6 +83,7 @@ from custom_components.securitas.verisure_owa_api import (
     AccountBlockedError,
     Attribute,
     AuthenticationError,
+    HttpTransport,
     OtpPhone,
     TwoFactorRequiredError,
     VerisureOwaClient,
@@ -5906,6 +5907,163 @@ async def test_a_failed_sign_in_keeps_the_choice_just_made(hass):
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_KEEP_PASSWORD] is False
     assert CONF_PASSWORD not in entry.data
+
+
+def _make_options_entry_with_kept_password(hass, *, keep: bool = True):
+    """An entry with one lock, so the Configure dialog runs all three steps,
+    and the account's shared client holding the kept password."""
+    entry = _make_entry_with_locks(
+        hass, registered_locks=[{"device_id": "lockA", "alias": "Front Door"}]
+    )
+    data = {**entry.data, CONF_KEEP_PASSWORD: keep}
+    if not keep:
+        data.pop(CONF_PASSWORD, None)
+    hass.config_entries.async_update_entry(entry, data=data)
+    hub = make_securitas_hub_mock()
+    if keep:
+        hub.client.password = entry.data[CONF_PASSWORD]
+        hub.client.password_kept = True
+    hass.data[DOMAIN]["sessions"] = {"test@example.com": {"hub": hub}}
+    return entry, hub
+
+
+async def _submit_options_init(hass, entry, sign_in: dict):
+    """Open the Configure dialog and submit its first page with ``sign_in``
+    as the sign-in section's payload."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    base: dict = {
+        "pin": {CONF_CODE: "", CONF_CODE_ARM_REQUIRED: False},
+        "notifications": {},
+        CONF_ADVANCED: {
+            CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
+            CONF_DELAY_CHECK_OPERATION: float(DEFAULT_DELAY_CHECK_OPERATION),
+        },
+    }
+    base["sign_in"] = sign_in
+    user_input = _fill_optional_sections(result, base)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+
+
+async def _finish_options(hass, result):
+    """Submit the mappings and lock pages of an open Configure dialog."""
+    assert result["step_id"] == "mappings"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+        },
+    )
+    assert result["step_id"] == "lock_automations"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"lock__lockA": {}}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    return result
+
+
+async def test_options_shows_keep_password_only_when_kept(hass):
+    """Configure shows the box, ticked, only on an entry that keeps a password:
+    turning it on needs Reconfigure, where the password is typed."""
+    kept, _ = _make_options_entry_with_kept_password(hass)
+    result = await hass.config_entries.options.async_init(kept.entry_id)
+    assert _section_inner_keys(result["data_schema"], "sign_in") == {CONF_KEEP_PASSWORD}
+    marker = _section_inner_marker(result["data_schema"], "sign_in", CONF_KEEP_PASSWORD)
+    assert marker.default() is True
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    hass.config_entries.async_update_entry(
+        kept,
+        data={
+            k: v
+            for k, v in kept.data.items()
+            if k not in (CONF_PASSWORD, CONF_KEEP_PASSWORD)
+        }
+        | {CONF_KEEP_PASSWORD: False},
+    )
+    result = await hass.config_entries.options.async_init(kept.entry_id)
+    assert "sign_in" not in _section_keys(result["data_schema"])
+    assert CONF_KEEP_PASSWORD not in _all_form_keys(result["data_schema"])
+
+
+async def test_options_untick_removes_password_without_signing_in(hass):
+    """Unticking and saving deletes the kept password and the client stops
+    using it, with no request to Verisure."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+
+    with patch.object(HttpTransport, "execute", new_callable=AsyncMock) as transport:
+        result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+        await _finish_options(hass, result)
+
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+    assert hub.client.password == ""
+    assert hub.client.password_kept is False
+    transport.assert_not_called()
+    assert hub.mock_calls == []
+    assert hub.client.mock_calls == []
+
+
+async def test_options_untick_then_abandon_keeps_password(hass):
+    """Closing the dialog before its last page changes nothing."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+    assert result["step_id"] == "mappings"
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "test-password"
+    assert hub.client.password == "test-password"
+    assert hub.client.password_kept is True
+
+
+async def test_options_keep_password_not_saved_in_options(hass):
+    """The box lives in entry data; neither choice lands in the options."""
+    entry, _ = _make_options_entry_with_kept_password(hass)
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: True})
+    result = await _finish_options(hass, result)
+
+    assert CONF_KEEP_PASSWORD not in result["data"]
+    assert CONF_KEEP_PASSWORD not in entry.options
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+    result = await _finish_options(hass, result)
+
+    assert CONF_KEEP_PASSWORD not in result["data"]
+    assert CONF_KEEP_PASSWORD not in entry.options
+
+
+async def test_options_leaving_it_ticked_changes_nothing(hass):
+    """Saving with the box still ticked keeps the password and the client's
+    use of it."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+    data_before = dict(entry.data)
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: True})
+    await _finish_options(hass, result)
+
+    assert dict(entry.data) == data_before
+    assert hub.client.password == "test-password"
+    assert hub.client.password_kept is True
+
+
+async def test_setup_options_step_has_no_sign_in_section(hass):
+    """Setup's settings page has no sign-in section: the box is on the
+    sign-in page itself."""
+    with _patches(_hub_factory()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+            data={**USER_INPUT_CREDENTIALS, CONF_KEEP_PASSWORD: True},
+        )
+
+    assert result["step_id"] == "options"
+    assert "sign_in" not in _section_keys(result["data_schema"])
 
 
 async def test_reauth_ticking_through_a_text_message_code_stores_password(hass):

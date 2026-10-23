@@ -155,11 +155,13 @@ SECTION_PIN = "pin"
 SECTION_NOTIFICATIONS = "notifications"
 SECTION_SUBPANELS = "subpanels"
 SECTION_ACTIVITY = "activity"
+SECTION_SIGN_IN = "sign_in"
 _ALL_SECTIONS = (
     SECTION_PIN,
     SECTION_NOTIFICATIONS,
     SECTION_SUBPANELS,
     SECTION_ACTIVITY,
+    SECTION_SIGN_IN,
     CONF_ADVANCED,
 )
 
@@ -364,12 +366,14 @@ def _build_settings_schema(
     *,
     use_suggested: bool = False,
     extra_fields: dict[Any, Any] | None = None,
+    keep_password_default: bool | None = None,
 ) -> vol.Schema:
     """Build the shared sectioned settings schema for config and options flows.
 
     Layout: a PIN section, a Force-arm-notifications section, an optional
     Sub-panels section (only present when ``extra_fields`` is non-empty),
-    and a collapsed Advanced section. Section payloads are flattened back
+    an optional Sign-in section (only present when ``keep_password_default``
+    is given), and a collapsed Advanced section. Section payloads are flattened back
     to top-level keys by ``_flatten_sections`` before persistence — the
     saved data shape is unchanged.
 
@@ -496,6 +500,13 @@ def _build_settings_schema(
             {"collapsed": False},
         )
     schema_dict[vol.Optional(SECTION_ACTIVITY)] = activity_section
+    if keep_password_default is not None:
+        schema_dict[vol.Optional(SECTION_SIGN_IN)] = section(
+            vol.Schema(
+                {vol.Optional(CONF_KEEP_PASSWORD, default=keep_password_default): bool}
+            ),
+            {"collapsed": False},
+        )
     schema_dict[vol.Optional(CONF_ADVANCED)] = advanced_section
     return vol.Schema(schema_dict)
 
@@ -1440,6 +1451,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self) -> None:
         """Initialize options flow."""
         self._general_data: dict[str, Any] = {}
+        self._forget_password = False
 
     def _get(self, key: str, default: Any = None) -> Any:
         """Read current value from options, falling back to entry data."""
@@ -1453,6 +1465,8 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         """Step 1: General settings."""
         if user_input is not None:
             user_input = _flatten_sections(user_input)
+            # The box lives in entry data, not options.
+            self._forget_password = user_input.pop(CONF_KEEP_PASSWORD, True) is False
             raw_code = user_input.pop(CONF_CODE, DEFAULT_CODE)
             code_hash, code_is_numeric = _resolve_code_submission(
                 raw_code,
@@ -1512,8 +1526,25 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             notify_options,
             use_suggested=True,
             extra_fields=extra_fields,
+            # Turning it on needs Reconfigure, where the password is typed.
+            keep_password_default=(
+                True if self.config_entry.data.get(CONF_KEEP_PASSWORD) else None
+            ),
         )
         return self.async_show_form(step_id="init", data_schema=schema)
+
+    def _save(self, data: dict[str, Any]) -> config_entries.ConfigFlowResult:
+        """Save the options and, if the box was unticked, forget the kept
+        password without signing in."""
+        if self._forget_password:
+            entry = self.config_entry
+            new_data = {**entry.data, CONF_KEEP_PASSWORD: False}
+            new_data.pop(CONF_PASSWORD, None)
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+            _sync_kept_password(
+                self.hass, entry.data[CONF_USERNAME], forget_unkept=True
+            )
+        return self.async_create_entry(title="", data=data)
 
     async def async_step_mappings(
         self, user_input: dict[str, Any] | None = None
@@ -1607,7 +1638,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         """
         registered_locks = await self._get_registered_locks()
         if not registered_locks:
-            return self.async_create_entry(title="", data=self._general_data)
+            return self._save(self._general_data)
 
         enabled_circuits = self._get_enabled_circuits()
         # Preserve LOCK_CIRCUITS ordering so the UI is consistent.
@@ -1630,10 +1661,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                         if section_data.get(f"unlock_disarms__{c}", False)
                     ],
                 }
-            return self.async_create_entry(
-                title="",
-                data={**self._general_data, CONF_LOCK_AUTOMATIONS: new_map},
-            )
+            return self._save({**self._general_data, CONF_LOCK_AUTOMATIONS: new_map})
 
         existing = self.config_entry.options.get(CONF_LOCK_AUTOMATIONS, {})
 

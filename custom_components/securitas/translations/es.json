@@ -148,6 +148,16 @@
                             "enable_activity_polling": "Sondear el registro de actividad una vez por minuto en segundo plano (para automatizaciones por eventos)"
                         }
                     },
+                    "sign_in": {
+                        "name": "Inicio de sesión",
+                        "description": "Su contraseña se guarda en los archivos de configuración de Home Assistant para que la integración pueda volver a iniciar sesión por sí sola.",
+                        "data": {
+                            "keep_password": "Guardar mi contraseña para que la integración pueda volver a iniciar sesión por sí sola"
+                        },
+                        "data_description": {
+                            "keep_password": "Desmárquelo y guarde para borrar al instante la contraseña guardada, sin iniciar sesión. Para volver a guardar su contraseña, use Reconfigurar, donde la escribe."
+                        }
+                    },
                     "advanced": {
                         "name": "Avanzado",
                         "data": {

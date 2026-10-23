@@ -175,6 +175,16 @@
                             "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations)"
                         }
                     },
+                    "sign_in": {
+                        "name": "Sign-in",
+                        "description": "Your password is kept in Home Assistant's configuration files so the integration can sign in again by itself.",
+                        "data": {
+                            "keep_password": "Keep my password so the integration can sign in again by itself"
+                        },
+                        "data_description": {
+                            "keep_password": "Untick and save to delete the stored password at once, without signing in. To keep your password again, use Reconfigure, where you type it."
+                        }
+                    },
                     "advanced": {
                         "name": "Advanced",
                         "data": {
