@@ -10,7 +10,7 @@ untouched. However long the crashes last, they are retried, never turned into
 reauth (see REFRESH_REFUSAL_ALERT_AFTER in the client); these tests guard
 against a crash being turned into a reauth trigger or corrupting the stored
 token. TestRefreshTokenRejectedHandling applies the same checks to
-a single err 4 or err 7 refusal of the stored token.
+a single refusal of the stored token: err 4, err 7, or any other code.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import pytest
 from custom_components.securitas.verisure_owa_api.client import VerisureOwaClient
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
+    dead_refresh_token_signal,
     is_genuine_auth_failure,
     is_refresh_token_rejected,
 )
@@ -27,6 +28,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 from .conftest import (
     refresh_crash_response,
     refresh_token_rejected_err7_response,
+    refresh_token_rejected_err99_response,
     refresh_token_rejected_response,
 )
 
@@ -106,5 +108,20 @@ class TestRefreshTokenRejectedHandling:
             await client.refresh_token()
 
         assert is_refresh_token_rejected(excinfo.value) is True
+        assert is_genuine_auth_failure(excinfo.value) is False
+        assert client.refresh_token_value == "on-disk-refresh-token"
+
+    async def test_raw_reply_with_another_code_is_a_refusal(
+        self, mock_transport
+    ) -> None:
+        mock_transport.execute.return_value = refresh_token_rejected_err99_response()
+        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
+
+        with pytest.raises(VerisureOwaError) as excinfo:
+            await client.refresh_token()
+
+        assert dead_refresh_token_signal(excinfo.value) == (
+            "refresh-token rejection (err 99)"
+        )
         assert is_genuine_auth_failure(excinfo.value) is False
         assert client.refresh_token_value == "on-disk-refresh-token"

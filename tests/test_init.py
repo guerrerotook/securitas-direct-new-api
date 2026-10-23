@@ -108,6 +108,7 @@ from tests.conftest import (
     refresh_login_crash_error,
     refresh_response,
     refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
     refresh_token_rejected_error,
 )
 from tests.test_hub import make_hub
@@ -3790,9 +3791,10 @@ _REFUSALS = pytest.mark.parametrize(
     [
         refresh_token_rejected_error,
         refresh_token_rejected_err7_error,
+        refresh_token_rejected_err99_error,
         refresh_login_crash_error,
     ],
-    ids=["err4", "err7", "crash"],
+    ids=["err4", "err7", "err99", "crash"],
 )
 
 _ALERT_LOG = "Verisure has refused to renew the saved sign-in"

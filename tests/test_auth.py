@@ -38,6 +38,7 @@ from .conftest import (
     refresh_login_crash_error,
     refresh_response,
     refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
     refresh_token_rejected_error,
     validate_device_response,
 )
@@ -726,9 +727,10 @@ REFUSALS = pytest.mark.parametrize(
     [
         refresh_token_rejected_error,
         refresh_token_rejected_err7_error,
+        refresh_token_rejected_err99_error,
         refresh_login_crash_error,
     ],
-    ids=["err4", "err7", "crash"],
+    ids=["err4", "err7", "err99", "crash"],
 )
 
 
@@ -935,6 +937,7 @@ class TestRefusalsKeepRetrying:
         refusals = [
             refresh_token_rejected_error,
             refresh_token_rejected_err7_error,
+            refresh_token_rejected_err99_error,
             refresh_login_crash_error,
         ]
 

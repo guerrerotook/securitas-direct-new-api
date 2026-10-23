@@ -35,6 +35,7 @@ from .conftest import (
     refresh_login_crash_error,
     refresh_timeout_reply_error,
     refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
     refresh_token_rejected_error,
 )
 
@@ -549,6 +550,7 @@ class TestRefusalsNeverAskForReauth:
             refresh_login_crash_error,
             refresh_token_rejected_error,
             refresh_token_rejected_err7_error,
+            refresh_token_rejected_err99_error,
         ],
     )
     def test_refusal_is_not_genuine(self, make_err):

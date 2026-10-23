@@ -213,6 +213,25 @@ def refresh_token_rejected_err7_response() -> dict:
     }
 
 
+def refresh_token_rejected_err99_response() -> dict:
+    """Build an xSRefreshLogin refusal with a code never seen (err 99 / 401).
+
+    Stands in for any error code Verisure may answer the renewal with: every
+    one counts as a refusal of the saved sign-in, not only err 4 and err 7.
+    """
+    return {
+        "errors": [
+            {
+                "message": "Si è verificato un errore inaspettato",
+                "name": "ApiError",
+                "data": {"res": "ERROR", "err": "99", "status": 401},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+
+
 def login_error_reply(error: dict) -> dict:
     """An ``mkLoginToken`` reply carrying ``error`` and no sign-in."""
     return {
@@ -251,6 +270,14 @@ def login_rejected_error() -> AuthenticationError:
 def refresh_token_rejected_err7_error() -> VerisureOwaError:
     """Build the xSRefreshLogin ``err 7`` refusal as refresh_token() raises it."""
     body = refresh_token_rejected_err7_response()
+    err = VerisureOwaError(body["errors"][0]["message"], http_status=401)
+    err.response_body = body
+    return err
+
+
+def refresh_token_rejected_err99_error() -> VerisureOwaError:
+    """Build the err 99 refusal as refresh_token() raises it."""
+    body = refresh_token_rejected_err99_response()
     err = VerisureOwaError(body["errors"][0]["message"], http_status=401)
     err.response_body = body
     return err
