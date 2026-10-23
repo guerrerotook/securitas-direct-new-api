@@ -178,6 +178,53 @@ def test_two_accounts_passwords_both_redacted():
     assert record.msg == "[PASSWORD] and [PASSWORD]"
 
 
+@pytest.mark.parametrize("shorter_first", [True, False])
+def test_password_containing_another_is_fully_redacted(shorter_first):
+    """A password that contains another account's password is masked whole,
+    whichever was registered first, so its tail never reaches the log."""
+    f = SensitiveDataFilter()
+    passwords = [
+        ("password:aaaaaaaaaaaa", "shared-prefix"),
+        ("password:bbbbbbbbbbbb", "shared-prefix-private-suffix"),
+    ]
+    if not shorter_first:
+        passwords.reverse()
+    for key, value in passwords:
+        f.update_secret(key, value, label="[PASSWORD]")
+
+    record = logging.LogRecord(
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
+        msg="shared-prefix and shared-prefix-private-suffix",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "[PASSWORD] and [PASSWORD]"
+
+
+def test_token_containing_installation_number_is_fully_redacted():
+    """An installation number registered before a token that contains it does
+    not leave the rest of the token in the log."""
+    f = SensitiveDataFilter()
+    f.add_installation("1234567")
+    f.update_secret("auth_token", "tok-1234567-tail")
+
+    record = logging.LogRecord(
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
+        msg="token tok-1234567-tail for 1234567",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "token [AUTH_TOKEN] for ***4567"
+
+
 @pytest.mark.parametrize("replacement", [None, "new-secret"])
 def test_shared_value_stays_redacted_while_another_key_holds_it(replacement):
     """Two accounts with the same password: clearing or changing one account's

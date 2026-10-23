@@ -60,7 +60,8 @@ class SensitiveDataFilter(logging.Filter):
 
     def __init__(self) -> None:
         super().__init__()
-        # Maps raw secret value -> redaction label
+        # Maps raw secret value -> redaction label, longest value first so a
+        # secret containing another is replaced whole.
         self._secrets: dict[str, str] = {}
         # Maps secret key -> current raw value (for replacement on update)
         self._keys: dict[str, str] = {}
@@ -70,7 +71,7 @@ class SensitiveDataFilter(logging.Filter):
         if not number:
             return
         masked = "***" if len(number) <= 4 else "***" + number[-4:]
-        self._secrets[number] = masked
+        self._add(number, masked)
 
     def update_secret(
         self, key: str, value: str | None, *, label: str | None = None
@@ -91,8 +92,14 @@ class SensitiveDataFilter(logging.Filter):
 
         if label is None:
             label = _REDACTION_LABELS.get(key, f"[{key.upper()}]")
-        self._secrets[value] = label
+        self._add(value, label)
         self._keys[key] = value
+
+    def _add(self, value: str, label: str) -> None:
+        secrets = {**self._secrets, value: label}
+        self._secrets = dict(
+            sorted(secrets.items(), key=lambda item: len(item[0]), reverse=True)
+        )
 
     def _redact(self, text: str) -> str:
         """Replace all known secret values in a string."""
