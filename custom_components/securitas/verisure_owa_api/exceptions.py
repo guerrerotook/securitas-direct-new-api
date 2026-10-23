@@ -309,10 +309,10 @@ def is_credential_rejection(err: VerisureOwaError) -> bool:
     """True when Verisure's reply judged the credentials themselves: a wrong
     password, a blocked account, or an SMS code required.
 
-    Narrower than ``is_genuine_auth_failure``, which also counts a server
-    fault in a sign-in reply (login() raises any error reply as
-    AuthenticationError) and a sign-in refused locally with no reply. Decides
-    when a stored password must stop being used.
+    Narrower than ``is_genuine_auth_failure``, which counts any
+    AuthenticationError, including a sign-in refused locally with no reply
+    and one carrying a server fault. Decides when a stored password must stop
+    being used.
     """
     if isinstance(err, (AccountBlockedError, TwoFactorRequiredError)):
         return True
@@ -323,6 +323,12 @@ def is_credential_rejection(err: VerisureOwaError) -> bool:
         isinstance(err, AuthenticationError)
         or _error_code(err) in _GENUINE_AUTH_ERROR_CODES
     )
+
+
+def is_server_fault_reply(body: object) -> bool:
+    """True when a reply's first error reports Verisure's own fault."""
+    first = _first_error(body)
+    return first is not None and _is_server_fault(first)
 
 
 def _is_server_fault(first: dict[str, Any]) -> bool:

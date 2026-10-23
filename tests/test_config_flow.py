@@ -95,6 +95,9 @@ from custom_components.securitas.verisure_owa_api import (
 from tests.conftest import (
     FAKE_JWT,
     FAKE_REFRESH_TOKEN,
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
@@ -5713,6 +5716,35 @@ def _make_kept_password_entry(hass, **data) -> MockConfigEntry:
     )
     entry.add_to_hass(hass)
     return entry
+
+
+@pytest.mark.parametrize(
+    ("fault", "error"),
+    [
+        *((fault, "cannot_connect") for fault in LOGIN_SERVER_FAULTS),
+        ("wrong-password", "invalid_auth"),
+    ],
+)
+async def test_setup_sign_in_server_fault_shows_cannot_connect(hass, fault, error):
+    """A server fault answering the dialog's sign-in says nothing about
+    the password, so the dialog does not call it wrong."""
+    reply = login_error_reply(
+        LOGIN_WRONG_PASSWORD
+        if fault == "wrong-password"
+        else LOGIN_SERVER_FAULTS[fault]
+    )
+    with (
+        patch(PATCH_SESSION, return_value=MagicMock()),
+        patch.object(
+            HttpTransport, "execute", new_callable=AsyncMock, return_value=reply
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": error}
 
 
 async def test_setup_with_keep_password_stores_it(hass):

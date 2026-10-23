@@ -88,6 +88,42 @@ class TestLogin:
         with pytest.raises(AuthenticationError):
             await api.login()
 
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    @pytest.mark.parametrize("raised", [False, True], ids=["reply", "raised"])
+    async def test_server_fault_reply_is_not_a_credential_error(
+        self, api, mock_execute, fault, raised
+    ):
+        """Verisure's timeout, a 5xx status or its resolver crash says
+        nothing about the password: a plain error that keeps the reply."""
+        body = login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        if raised:
+            transport_err = VerisureOwaError("bad reply", http_status=500)
+            transport_err.response_body = body
+            mock_execute.side_effect = transport_err
+        else:
+            mock_execute.return_value = body
+
+        with pytest.raises(VerisureOwaError) as caught:
+            await api.login()
+
+        assert not isinstance(caught.value, AuthenticationError)
+        assert caught.value.response_body == body
+
+    @pytest.mark.parametrize("raised", [False, True], ids=["reply", "raised"])
+    async def test_wrong_password_reply_raises_authentication_error(
+        self, api, mock_execute, raised
+    ):
+        body = login_error_reply(LOGIN_WRONG_PASSWORD)
+        if raised:
+            transport_err = VerisureOwaError("bad reply", http_status=401)
+            transport_err.response_body = body
+            mock_execute.side_effect = transport_err
+        else:
+            mock_execute.return_value = body
+
+        with pytest.raises(AuthenticationError):
+            await api.login()
+
     async def test_transport_error_raises_securitas_error(self, api, mock_execute):
         """Connection error (no response data) re-raises VerisureOwaError."""
         mock_execute.side_effect = VerisureOwaError("Connection failed")
@@ -1278,17 +1314,20 @@ class TestKeptPassword:
         client.login.assert_awaited_once()
 
     @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
-    async def test_kept_password_survives_a_server_fault_at_sign_in(
+    async def test_server_fault_at_kept_password_sign_in_is_passing(
         self, mock_transport, clock, fault
     ):
-        """login() raises AuthenticationError for any error reply, a server
-        fault included; only a verdict on the password drops it."""
+        """A server fault answering the kept-password sign-in is a passing
+        fault, not a verdict: no reauth, the password stays, and the refusal
+        period carries on to its 15-minute notice."""
         rejected = MagicMock()
+        alerts = MagicMock()
         client = _token_only_client(
             mock_transport,
             password="secret",
             password_kept=True,
             on_kept_password_rejected=rejected,
+            on_refresh_refusal_alert=alerts,
         )
         del client.login  # the real login
         client.refresh_token = AsyncMock(
@@ -1298,11 +1337,19 @@ class TestKeptPassword:
             LOGIN_SERVER_FAULTS[fault]
         )
 
-        assert isinstance(await _poll(client), AuthenticationError)
+        err = await _poll(client)
 
+        assert isinstance(err, VerisureOwaError)
+        assert not isinstance(err, AuthenticationError)
+        assert not is_genuine_auth_failure(err)
+        assert err.response_body == login_error_reply(LOGIN_SERVER_FAULTS[fault])
         assert client.password == "secret"
         assert client.password_kept is True
         rejected.assert_not_called()
+        for _ in range(15):
+            clock.advance(minutes=1)
+            await _poll(client)
+        alerts.assert_called_once_with(True)
 
     async def test_kept_password_rejected_by_verisure_reply_is_dropped(
         self, mock_transport, clock

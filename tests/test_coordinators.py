@@ -40,6 +40,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     WAFBlockedError,
 )
+from custom_components.securitas.verisure_owa_api.http_transport import HttpTransport
 from custom_components.securitas.verisure_owa_api.models import (
     ActivityCategory,
     ActivityEvent,
@@ -53,7 +54,12 @@ from custom_components.securitas.verisure_owa_api.models import (
     ThumbnailResponse,
 )
 
-from .conftest import make_installation
+from .conftest import (
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
+    make_installation,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -539,6 +545,40 @@ class TestAlarmCoordinator:
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fault", [*LOGIN_SERVER_FAULTS, "wrong-password"])
+    async def test_sign_in_server_fault_is_retried_not_reauth(self, fault):
+        """The client's sign-in, answered with a server fault, fails the poll
+        as a passing fault; a wrong password still asks to sign in again."""
+        reply = login_error_reply(
+            LOGIN_WRONG_PASSWORD
+            if fault == "wrong-password"
+            else LOGIN_SERVER_FAULTS[fault]
+        )
+        transport = AsyncMock(spec=HttpTransport)
+        transport.execute.return_value = reply
+        signing_in = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="secret",
+            device_id="dev",
+            uuid="uuid",
+            id_device_indigitall="",
+        )
+        with pytest.raises(VerisureOwaError) as caught:
+            await signing_in.login()
+        client = _make_client()
+        client.get_general_status.side_effect = caught.value
+
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        expected = ConfigEntryAuthFailed if fault == "wrong-password" else UpdateFailed
+        with pytest.raises(expected):
             await coord._async_update_data()
 
     @pytest.mark.asyncio

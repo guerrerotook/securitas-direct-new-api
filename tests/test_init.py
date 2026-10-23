@@ -61,6 +61,7 @@ from custom_components.securitas import (
     _build_config_dict,
     _cached_installations,
     _get_or_create_session,
+    _login_or_raise,
     _new_session_record,
     _options_are_authoritative,
     _raise_sign_in_issue,
@@ -4874,8 +4875,9 @@ class TestKeptPasswordSync:
             return_value=login_error_reply(LOGIN_SERVER_FAULTS[fault])
         )
 
-        with pytest.raises(AuthenticationError):
+        with pytest.raises(VerisureOwaError) as caught:
             await hub.client._check_authentication_token()
+        assert not isinstance(caught.value, AuthenticationError)
 
         assert hub.client.password == "kept-password"
         assert home.data[CONF_PASSWORD] == "kept-password"
@@ -4936,6 +4938,38 @@ class TestKeptPasswordSync:
         assert all(isinstance(r, Exception) for r in results)
         login.assert_awaited_once()
         self._assert_forgotten_but_ticked(home, office)
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    async def test_server_fault_at_setup_sign_in_waits_to_retry(self, hass, fault):
+        """Setup: a server fault answering the kept-password sign-in after a
+        refusal retries later and still counts the refusal; it does not ask
+        to sign in again."""
+        home, _, _ = self._ticked_pair_and_other_account(hass)
+        hass.data.setdefault(DOMAIN, {})
+        hub = self._refused_hub(hass, None, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        )
+
+        with pytest.raises(ConfigEntryNotReady):
+            await _login_or_raise(hass, hub, "test@example.com")
+
+        assert "test@example.com" in hass.data[DOMAIN]["refresh_refusals"]
+        assert _sign_in_issues(hass) == {}
+        assert home.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_wrong_password_at_setup_sign_in_asks_to_sign_in_again(self, hass):
+        self._ticked_pair_and_other_account(hass)
+        hass.data.setdefault(DOMAIN, {})
+        hub = self._refused_hub(hass, None, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_WRONG_PASSWORD)
+        )
+
+        with pytest.raises(AuthenticationError):
+            await _login_or_raise(hass, hub, "test@example.com")
+
+        assert list(_sign_in_issues(hass)) == [_SIGN_IN_ISSUE_ID]
 
     async def test_kept_password_failing_transiently_stays_in_the_entries(self, hass):
         home, office, _ = self._ticked_pair_and_other_account(hass)

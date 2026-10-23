@@ -11,6 +11,7 @@ from ..exceptions import (
     AuthenticationError,
     TwoFactorRequiredError,
     VerisureOwaError,
+    is_server_fault_reply,
 )
 from ..graphql_queries import (
     LOGIN_TOKEN_MUTATION,
@@ -74,6 +75,9 @@ class _AuthMixin(_ClientBase):
                     _new = AccountBlockedError(err.message, http_status=err.http_status)
                     _new.response_body = result_json
                     raise _new from err
+                # A passing fault says nothing about the password.
+                if is_server_fault_reply(result_json):
+                    raise
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken") and data["xSLoginToken"].get(
@@ -94,7 +98,12 @@ class _AuthMixin(_ClientBase):
 
         if "errors" in response:
             _LOGGER.error("Login error %s", response["errors"][0]["message"])
-            _new_err = AuthenticationError(response["errors"][0]["message"])
+            message = response["errors"][0]["message"]
+            _new_err = (
+                VerisureOwaError(message)
+                if is_server_fault_reply(response)
+                else AuthenticationError(message)
+            )
             _new_err.response_body = response
             raise _new_err
 
