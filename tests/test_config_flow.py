@@ -6012,6 +6012,35 @@ async def test_untick_in_reconfigure_stops_using_password(hass):
     assert hub.client.password_kept is False
 
 
+@pytest.mark.parametrize("keep_password", [True, False])
+async def test_reconfigure_onto_another_account_stops_the_old_one_using_the_password(
+    hass, keep_password
+):
+    """An entry moved to another account no longer provides a kept password
+    to its first account's client."""
+    entry = _make_kept_password_entry(hass)
+    old_hub = make_securitas_hub_mock()
+    old_hub.client.password = "old-password"
+    old_hub.client.password_kept = True
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "test@example.com": {"hub": old_hub, "holders": {entry.entry_id}}
+    }
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(
+        hass,
+        result["flow_id"],
+        _reauth_hub_seeing("123456"),
+        username="other@example.com",
+        keep_password=keep_password,
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_USERNAME] == "other@example.com"
+    assert old_hub.client.password == ""
+    assert old_hub.client.password_kept is False
+
+
 async def test_untick_in_reconfigure_keeps_other_ticked_entrys_password(hass):
     """Unticking one entry leaves the client with the password another
     ticked entry on the account still keeps."""

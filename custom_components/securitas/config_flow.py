@@ -954,6 +954,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 account_entries = self._move_account_onto_sign_in(
                     username, refresh_token, besides=self._reauth_entry
                 )
+                if switched:
+                    _sync_kept_password(self.hass, old_username)
             # Home Assistant before 2025.5 leaves the entry's reauth dialog open
             # through the reload; submitted later, it would replace this sign-in.
             for flow in list(
