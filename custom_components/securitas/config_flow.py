@@ -768,13 +768,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_DELAY_CHECK_OPERATION] = DEFAULT_DELAY_CHECK_OPERATION
         self.config[CONF_DEVICE_INDIGITALL] = ""
         self.config[CONF_ENTRY_ID] = ""
-        # Reuse existing session for this username if one is already running,
-        # to avoid a new login that would invalidate the active session.
         username = self.config[CONF_USERNAME]
         session = self.hass.data.get(DOMAIN, {}).get("sessions", {}).get(username)
         if session is not None and not self.config.get(CONF_KEEP_PASSWORD):
-            # Held before finish_setup awaits: the last entry unloading
-            # meanwhile would otherwise drop the session under us.
+            # Unticked, the account's running session is reused: a new login
+            # would invalidate it. Held before finish_setup awaits: the last
+            # entry unloading meanwhile would otherwise drop the session.
             self._borrow_session(username, session)
         else:
             # A password to keep is checked by signing in with it, which
