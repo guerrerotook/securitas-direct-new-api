@@ -1414,9 +1414,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _sign_in_in_place_of(
         self, username: str, session: dict[str, Any]
-    ) -> list[config_entries.ConfigEntry]:
+    ) -> list[config_entries.ConfigEntry] | None:
         """Sign in with the typed password and make this hub the account's
-        session in place of ``session``; return the entries to reload.
+        session in place of ``session``; return the entries to reload, or
+        None when the sign-in brought no refresh token and nothing changed.
 
         Called under the account lock. Replaced here, not when the entry is
         created: the new sign-in has already made the running session's token
@@ -1431,7 +1432,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Creating the entry refuses a sign-in with no refresh token; the
         # running entries must not be handed an empty one meanwhile.
         if not refresh_token:
-            return []
+            return None
         registered = _replace_account_session(self.hass, username, self.hub)
         self._hold_flow_session(username, registered)
         return self._move_account_onto_sign_in(username, refresh_token)

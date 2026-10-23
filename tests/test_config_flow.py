@@ -5819,6 +5819,51 @@ async def test_add_installation_ticked_wrong_password_shows_invalid_auth(hass):
     assert home.state is ConfigEntryState.LOADED
 
 
+async def test_add_installation_ticked_without_a_refresh_token_changes_nothing(hass):
+    """A sign-in that returns no saved sign-in replaces nothing: the running
+    entry keeps its session, and the account's setup tracking and notices
+    stay; the dialog then refuses to create the entry."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    home_data_before = dict(home.data)
+    domain_data = hass.data[DOMAIN]
+    refusal = {"since": datetime.now(UTC), "alerted": False}
+    domain_data.setdefault("refresh_refusals", {})["test@example.com"] = refusal
+    unreachable = {"since": datetime.now(UTC), "alerted": True}
+    domain_data.setdefault("unreachable", {})["test@example.com"] = unreachable
+    raise_unreachable_issue(hass, "test@example.com")
+    new_hub = _new_sign_in_hub()
+    new_hub.get_refresh_token.return_value = None
+
+    with (
+        _patches(new_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+
+    assert result["step_id"] == "options"
+    new_hub.login.assert_awaited_once()
+    mock_reload.assert_not_awaited()
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is running
+    assert dict(home.data) == home_data_before
+    assert _refusals(hass)["test@example.com"] is refusal
+    assert domain_data["unreachable"]["test@example.com"] is unreachable
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, _unreachable_issue_id("test@example.com")
+    )
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "no_refresh_token"
+
+
 async def test_add_installation_ticked_then_abandoned_leaves_other_entries_working(
     hass,
 ):
