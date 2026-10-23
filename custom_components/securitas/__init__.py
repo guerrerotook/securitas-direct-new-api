@@ -105,6 +105,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENTRY_ID,
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
+    CONF_KEEP_PASSWORD,
     CONF_LOCK_AUTOMATIONS,
     CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
@@ -593,6 +594,7 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data.get(CONF_PASSWORD, "")
+    config[CONF_KEEP_PASSWORD] = entry.data.get(CONF_KEEP_PASSWORD, False)
     config[CONF_REFRESH_TOKEN] = entry.data.get(CONF_REFRESH_TOKEN, "")
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
     config[CONF_CODE_HASH] = _opt(CONF_CODE_HASH, None)

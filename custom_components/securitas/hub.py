@@ -26,6 +26,7 @@ from .const import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
+    CONF_KEEP_PASSWORD,
     CONF_OPERATION_POLL_TIMEOUT,
     CONF_REFRESH_TOKEN,
     DEFAULT_OPERATION_POLL_TIMEOUT,
@@ -660,7 +661,8 @@ class VerisureHub:
     def _persist_refresh_token(self, value: str) -> None:
         """Write a rotated refresh token back to the config entry.
 
-        Also scrubs any legacy CONF_PASSWORD on the first capture. No-op when
+        Also scrubs a CONF_PASSWORD the entry does not keep (a legacy one, or
+        one beside an unticked box) on the first capture. No-op when
         the hub is detached from a config entry (config-flow construction).
 
         Never writes into an entry that reauth or Reconfigure has moved to
@@ -680,14 +682,15 @@ class VerisureHub:
             outcome = "other-account"
         else:
             existing = self.config_entry.data
-            if (
-                existing.get(CONF_REFRESH_TOKEN) == value
-                and CONF_PASSWORD not in existing
+            keeps_password = bool(existing.get(CONF_KEEP_PASSWORD))
+            if existing.get(CONF_REFRESH_TOKEN) == value and (
+                keeps_password or CONF_PASSWORD not in existing
             ):
                 outcome = "already-current"
             else:
                 new_data = {**existing, CONF_REFRESH_TOKEN: value}
-                new_data.pop(CONF_PASSWORD, None)
+                if not keeps_password:
+                    new_data.pop(CONF_PASSWORD, None)
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, data=new_data
                 )

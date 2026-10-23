@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
+    CONF_KEEP_PASSWORD,
     CONF_REFRESH_TOKEN,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
@@ -375,6 +376,55 @@ class TestRefreshTokenPersistence:
         new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
         assert CONF_PASSWORD not in new_data
         assert new_data[CONF_REFRESH_TOKEN] == "same-token"
+
+    def test_persist_keeps_password_when_kept(self):
+        """An entry whose owner ticked the box keeps its password on rotation."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "old-token",
+                CONF_PASSWORD: "kept-password",
+                CONF_KEEP_PASSWORD: True,
+            }
+        )
+
+        hub._persist_refresh_token("rotated-token")
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert new_data[CONF_REFRESH_TOKEN] == "rotated-token"
+        assert new_data[CONF_PASSWORD] == "kept-password"
+        assert new_data[CONF_KEEP_PASSWORD] is True
+
+    def test_persist_does_not_rewrite_a_current_kept_entry(self):
+        """A kept password does not make an unchanged token look out of date."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "same-token",
+                CONF_PASSWORD: "kept-password",
+                CONF_KEEP_PASSWORD: True,
+            }
+        )
+
+        hub._persist_refresh_token("same-token")
+
+        hub.hass.config_entries.async_update_entry.assert_not_called()
+
+    def test_persist_scrubs_password_when_box_unticked(self):
+        """A password beside an unticked box is scrubbed like a legacy one."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "same-token",
+                CONF_PASSWORD: "stray-password",
+                CONF_KEEP_PASSWORD: False,
+            }
+        )
+
+        hub._persist_refresh_token("same-token")
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert CONF_PASSWORD not in new_data
 
     def test_never_writes_into_an_entry_signed_in_to_another_account(self, caplog):
         """Reconfigure can move the entry this session saves to onto another

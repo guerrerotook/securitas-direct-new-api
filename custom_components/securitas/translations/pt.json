@@ -25,7 +25,11 @@
                 "description": "A sua sessão expirou. Introduza novamente a sua palavra-passe para reconectar.",
                 "data": {
                     "username": "Nome de utilizador",
-                    "password": "Palavra-passe"
+                    "password": "Palavra-passe",
+                    "keep_password": "Guardar a minha palavra-passe para que a integração possa voltar a iniciar sessão sozinha"
+                },
+                "data_description": {
+                    "keep_password": "Se marcada, a sua palavra-passe é guardada sem encriptação nos ficheiros de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses ficheiros ou uma cópia de segurança deles a pode ler. Deixe-a desmarcada para guardar apenas a sessão guardada, que pode ser cancelada e só funciona para a Verisure."
                 }
             },
             "reconfigure": {
@@ -33,14 +37,22 @@
                 "description": "Introduza a sua palavra-passe da Verisure para obter uma nova sessão. Utilize esta opção quando a integração não conseguir ligar-se e não lhe tiver pedido para iniciar sessão novamente.",
                 "data": {
                     "username": "Nome de utilizador",
-                    "password": "Palavra-passe"
+                    "password": "Palavra-passe",
+                    "keep_password": "Guardar a minha palavra-passe para que a integração possa voltar a iniciar sessão sozinha"
+                },
+                "data_description": {
+                    "keep_password": "Se marcada, a sua palavra-passe é guardada sem encriptação nos ficheiros de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses ficheiros ou uma cópia de segurança deles a pode ler. Deixe-a desmarcada para guardar apenas a sessão guardada, que pode ser cancelada e só funciona para a Verisure."
                 }
             },
             "user": {
                 "data": {
                     "country": "Código do país",
                     "username": "Nome de utilizador",
-                    "password": "Palavra-passe"
+                    "password": "Palavra-passe",
+                    "keep_password": "Guardar a minha palavra-passe para que a integração possa voltar a iniciar sessão sozinha"
+                },
+                "data_description": {
+                    "keep_password": "Se marcada, a sua palavra-passe é guardada sem encriptação nos ficheiros de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses ficheiros ou uma cópia de segurança deles a pode ler. Deixe-a desmarcada para guardar apenas a sessão guardada, que pode ser cancelada e só funciona para a Verisure."
                 },
                 "description": "Iniciar sessão na Verisure.",
                 "title": "Iniciar sessão"

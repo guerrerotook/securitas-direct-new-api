@@ -65,6 +65,7 @@ from custom_components.securitas.const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_KEEP_PASSWORD,
     CONF_REFRESH_TOKEN,
     PANEL_OPTION_KEYS,
 )
@@ -5633,9 +5634,17 @@ async def _start_reconfigure_flow(hass, entry):
 
 
 async def _submit_sign_in(
-    hass, flow_id, hub, password="new-password", username="test@example.com"
+    hass,
+    flow_id,
+    hub,
+    password="new-password",
+    username="test@example.com",
+    keep_password=None,
 ):
     """Answer the entry's sign-in form (reauth or Reconfigure) with a reload that does nothing."""
+    user_input = {CONF_USERNAME: username, CONF_PASSWORD: password}
+    if keep_password is not None:
+        user_input[CONF_KEEP_PASSWORD] = keep_password
     with (
         _patches(hub),
         patch.object(
@@ -5643,11 +5652,7 @@ async def _submit_sign_in(
         ) as mock_reload,
     ):
         result = await hass.config_entries.flow.async_configure(
-            flow_id,
-            user_input={
-                CONF_USERNAME: username,
-                CONF_PASSWORD: password,
-            },
+            flow_id, user_input=user_input
         )
     return result, mock_reload
 
@@ -5684,6 +5689,162 @@ async def test_reconfigure_saves_a_fresh_login_without_the_password(hass):
     assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
     assert CONF_PASSWORD not in entry.data
     mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+def _schema_field(result, name):
+    return next(key for key in result["data_schema"].schema if str(key) == name)
+
+
+def _make_kept_password_entry(hass, **data) -> MockConfigEntry:
+    """A reauth entry whose owner ticked the keep-password box."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_123456",
+        data={
+            **REAUTH_ENTRY_DATA,
+            CONF_PASSWORD: "old-password",
+            CONF_KEEP_PASSWORD: True,
+            **data,
+        },
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_setup_with_keep_password_stores_it(hass):
+    """Ticking the box in setup keeps the typed password in the entry."""
+    result = await _complete_full_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_KEEP_PASSWORD: True},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEEP_PASSWORD] is True
+    assert result["data"][CONF_PASSWORD] == "test-password"
+    assert result["data"][CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
+async def test_setup_without_keep_password_drops_it(hass):
+    """Leaving the box unticked in setup stores only the saved sign-in."""
+    result = await _complete_full_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_KEEP_PASSWORD: False},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in result["data"]
+
+
+async def test_setup_form_offers_the_box_unticked_after_the_password(hass):
+    """The setup form shows the box, off by default, below the password."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    names = [str(key) for key in result["data_schema"].schema]
+    assert names.index(CONF_KEEP_PASSWORD) == names.index(CONF_PASSWORD) + 1
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is False
+
+
+async def test_reconfigure_ticking_stores_password(hass):
+    """Ticking the box in Reconfigure keeps the password just proven."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=True
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
+async def test_reconfigure_unticking_removes_password(hass):
+    """Unticking the box in Reconfigure deletes the kept password."""
+    entry = _make_kept_password_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is True
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=False
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+
+
+async def test_reauth_form_shows_current_choice(hass):
+    """The reauth form shows the entry's current choice, ticked or not."""
+    ticked = _make_kept_password_entry(hass)
+    result = await _start_reauth_flow(hass, ticked)
+
+    names = [str(key) for key in result["data_schema"].schema]
+    assert names.index(CONF_KEEP_PASSWORD) == names.index(CONF_PASSWORD) + 1
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is True
+
+    unticked = _make_reauth_office_entry(hass)
+    result = await _start_reauth_flow(hass, unticked)
+
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is False
+
+
+async def test_reauth_ticking_stores_password(hass):
+    """Ticking the box in reauth keeps the password just proven."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=True
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+
+
+async def test_reconfigure_updates_kept_password_on_other_ticked_entries(hass):
+    """Another ticked entry on the account takes the password just proven,
+    so a password change leaves no stale kept password; its box stays as is."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    hass.config_entries.async_update_entry(
+        office, data={**office.data, CONF_KEEP_PASSWORD: True}
+    )
+    result = await _start_reconfigure_flow(hass, home)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=False
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert office.data[CONF_KEEP_PASSWORD] is True
+    assert office.data[CONF_PASSWORD] == "new-password"
+    assert office.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    assert CONF_PASSWORD not in home.data
+
+
+async def test_reconfigure_leaves_other_unticked_entries_without_password(hass):
+    """Ticking the box on one entry does not tick it, or store the password,
+    on the account's other entries."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    result = await _start_reconfigure_flow(hass, home)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=True
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert CONF_PASSWORD not in office.data
+    assert office.data.get(CONF_KEEP_PASSWORD, False) is False
+    assert home.data[CONF_PASSWORD] == "new-password"
 
 
 async def test_reconfigure_with_a_wrong_password_asks_again(hass):

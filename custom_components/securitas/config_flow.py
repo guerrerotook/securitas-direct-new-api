@@ -93,6 +93,7 @@ from .const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_KEEP_PASSWORD,
     CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
     DEFAULT_ENABLE_ACTIVITY_POLLING,
@@ -536,7 +537,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _create_entry_for_installation(
         self, installation: Installation
     ) -> config_entries.ConfigFlowResult:
-        """Register a new entry, persisting the refresh token (not the password)."""
+        """Register a new entry with the refresh token, and the password only
+        when the user ticked the box to keep it."""
         username = self.config[CONF_USERNAME]
         unique_id = _unique_id_for(username, installation.number)
         await self.async_set_unique_id(unique_id)
@@ -557,7 +559,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
             return self.async_abort(reason="no_refresh_token")
         entry_data = dict(self.config)
-        entry_data.pop(CONF_PASSWORD, None)
+        entry_data[CONF_KEEP_PASSWORD] = bool(entry_data.get(CONF_KEEP_PASSWORD))
+        if not entry_data[CONF_KEEP_PASSWORD]:
+            entry_data.pop(CONF_PASSWORD, None)
         entry_data[CONF_REFRESH_TOKEN] = refresh_token
         return self.async_create_entry(
             title=installation.alias,
@@ -734,6 +738,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(CONF_USERNAME, default=d.get(CONF_USERNAME, "")): str,
                 vol.Required(CONF_PASSWORD): str,
+                vol.Optional(
+                    CONF_KEEP_PASSWORD, default=d.get(CONF_KEEP_PASSWORD, False)
+                ): bool,
             }
         )
 
@@ -799,6 +806,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+            self.config[CONF_KEEP_PASSWORD] = bool(
+                user_input.get(CONF_KEEP_PASSWORD, False)
+            )
             self.config[CONF_USERNAME] = user_input.get(
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
             )
@@ -844,6 +854,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         assert self._reauth_entry is not None
         username = self._reauth_entry.data.get(CONF_USERNAME, "")
+        keep_password = bool(self._reauth_entry.data.get(CONF_KEEP_PASSWORD, False))
         return self.async_show_form(
             step_id=(
                 "reconfigure"
@@ -854,13 +865,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_USERNAME, default=username): str,
                     vol.Required(CONF_PASSWORD): str,
+                    vol.Optional(CONF_KEEP_PASSWORD, default=keep_password): bool,
                 }
             ),
             errors=errors or {},
         )
 
     async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
-        """Capture a fresh refresh token and reload; the supplied password is never persisted."""
+        """Capture a fresh refresh token and reload; the supplied password is
+        kept only on entries whose box is ticked."""
         assert self._reauth_entry is not None
         assert self.hub is not None
         # Checked again under the account lock; here, before the checks
@@ -928,7 +941,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 ]
                 for entry in account_entries:
                     new_data = {**entry.data, CONF_REFRESH_TOKEN: refresh_token}
-                    new_data.pop(CONF_PASSWORD, None)
+                    # The password just proven replaces a kept one, which a
+                    # password change would otherwise leave stale.
+                    if new_data.get(CONF_KEEP_PASSWORD):
+                        new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+                    else:
+                        new_data.pop(CONF_PASSWORD, None)
                     self.hass.config_entries.async_update_entry(entry, data=new_data)
                 self._overtake_sign_ins_in_flight(username)
             # Home Assistant before 2025.5 leaves the entry's reauth dialog open
@@ -1021,7 +1039,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         assert self._reauth_entry is not None
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = username
-        new_data.pop(CONF_PASSWORD, None)
+        new_data[CONF_KEEP_PASSWORD] = bool(self.config.get(CONF_KEEP_PASSWORD))
+        if new_data[CONF_KEEP_PASSWORD]:
+            new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+        else:
+            new_data.pop(CONF_PASSWORD, None)
         new_data[CONF_REFRESH_TOKEN] = refresh_token
         unique_id: str | UndefinedType = UNDEFINED
         if installation and switched:
