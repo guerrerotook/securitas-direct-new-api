@@ -2798,6 +2798,30 @@ class TestSignInIssue:
         assert issue.translation_placeholders == {"username": "test@example.com"}
         assert "@" not in _SIGN_IN_ISSUE_ID
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            TwoFactorRequiredError("2FA required"),
+            AuthenticationError("bad credentials"),
+            AccountBlockedError("blocked"),
+        ],
+        ids=["code-needed", "login-rejected", "blocked"],
+    )
+    async def test_a_sign_in_repair_replaces_the_unreachable_notice(
+        self, hass, mock_hub, error
+    ):
+        """One problem, one notice: the sign-in issue removes the account's
+        "can't reach Verisure" notice."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_unreachable_issue(hass, "test@example.com")
+        assert list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]
+
+        await self._fail(hass, entry, mock_hub, error)
+
+        assert list(_sign_in_issues(hass)) == [_SIGN_IN_ISSUE_ID]
+        assert _unreachable_issues(hass) == {}
+
     async def test_a_blocked_account_raises_a_repair_saying_how_to_unblock_it(
         self, hass, mock_hub
     ):
@@ -4779,6 +4803,38 @@ class TestKeptPasswordSync:
 
         assert hub.client.password == ""
         assert hub.client.password_kept is False
+
+    async def test_plain_unload_and_reload_keep_the_kept_password(self, hass):
+        """A reload, or Home Assistant stopping, is not the user saying no:
+        the shared client keeps the ticked entry's password, and the log
+        filter keeps hiding it."""
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        unticked = self._entry(hass, kept=False)
+        ticked = self._entry(hass, kept=True, password="kept-password")
+        log_filter = self._session(hass, hub, unticked.entry_id, ticked.entry_id)
+        self._register(log_filter, "kept-password")
+        hass.data[DOMAIN][ticked.entry_id] = {"hub": hub, "devices": []}
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            assert await async_unload_entry(hass, ticked) is True
+
+        assert hub.client.password == "kept-password"
+        assert hub.client.password_kept is True
+        assert log_filter._redact("kept-password") == "[PASSWORD]"
+
+        await _get_or_create_session(hass, dict(ticked.data), ticked)
+
+        assert hub.client.password == "kept-password"
+        assert hub.client.password_kept is True
+        assert log_filter._redact("kept-password") == "[PASSWORD]"
 
     async def test_sync_leaves_in_memory_password_alone(self, hass):
         hub = make_securitas_hub_mock()

@@ -53,6 +53,7 @@ from custom_components.securitas import (
     _async_teardown_domain_if_unused,
     _get_or_create_session,
     _login_or_raise,
+    _password_secret_key,
     _raise_sign_in_issue,
     async_remove_entry,
     async_unload_entry,
@@ -76,6 +77,7 @@ from custom_components.securitas.hub import (
     raise_renewal_refused_issue,
     raise_unreachable_issue,
 )
+from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
     PERI_DEFAULTS,
@@ -6084,6 +6086,27 @@ async def test_reconfigure_onto_another_account_stops_the_old_one_using_the_pass
     assert entry.data[CONF_USERNAME] == "other@example.com"
     assert old_hub.client.password == ""
     assert old_hub.client.password_kept is False
+
+
+async def test_untick_in_reconfigure_unregisters_the_password_from_the_log(hass):
+    """No client holds the password once the box is unticked, so the log
+    filter stops looking for it."""
+    entry = _make_kept_password_entry(hass)
+    log_filter = SensitiveDataFilter()
+    log_filter.update_secret(
+        _password_secret_key("test@example.com"), "old-password", label="[PASSWORD]"
+    )
+    hass.data.setdefault(DOMAIN, {})["log_filter"] = log_filter
+    assert log_filter._redact("old-password") == "[PASSWORD]"
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    hub.client.password = "old-password"
+    hub.client.password_kept = True
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, keep_password=False)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert log_filter._redact("old-password") == "old-password"
 
 
 async def test_untick_in_reconfigure_keeps_other_ticked_entrys_password(hass):
