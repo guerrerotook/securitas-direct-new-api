@@ -76,6 +76,7 @@ from custom_components.securitas.hub import (
     _unreachable_issue_id,
     raise_renewal_refused_issue,
     raise_unreachable_issue,
+    setup_passwords,
 )
 from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.pin_crypto import verify_pin
@@ -102,6 +103,7 @@ from tests.conftest import (
     make_installation,
     make_securitas_hub_mock,
     refresh_login_crash_error,
+    refresh_token_rejected_response,
 )
 
 
@@ -5826,6 +5828,7 @@ async def test_add_installation_ticked_on_running_account_signs_in(hass):
     assert result["data"][CONF_PASSWORD] == "typed-password"
     assert result["data"][CONF_DEVICE_ID] == running.config[CONF_DEVICE_ID]
     assert _flow_sessions(hass)["test@example.com"]["hub"] is new_hub
+    assert setup_passwords(hass) == {}
 
 
 async def test_add_installation_ticked_wrong_password_shows_invalid_auth(hass):
@@ -5923,6 +5926,114 @@ async def test_add_installation_ticked_then_abandoned_leaves_other_entries_worki
     assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
     assert home.state is ConfigEntryState.LOADED
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert setup_passwords(hass) == {}
+
+
+async def _reject_kept_password(hass, password):
+    """Have Verisure refuse the account's saved sign-in and then reject the
+    kept ``password`` it is retried with, as a running entry's renewal would."""
+    rejected = VerisureHub(
+        {
+            **make_config_entry_data(password=password),
+            CONF_KEEP_PASSWORD: True,
+            CONF_REFRESH_TOKEN: "saved-token",
+        },
+        None,
+        MagicMock(),
+        hass,
+    )
+    rejected.client._transport.execute = AsyncMock(
+        side_effect=[
+            refresh_token_rejected_response(),
+            login_error_reply(LOGIN_WRONG_PASSWORD),
+        ]
+    )
+    with pytest.raises(AuthenticationError):
+        await rejected.client._check_authentication_token()
+
+
+@pytest.mark.parametrize("running_account", [True, False])
+async def test_add_installation_ticked_does_not_save_a_password_rejected_meanwhile(
+    hass, running_account
+):
+    """Verisure rejecting the typed password while the dialog is still open
+    removes it from the dialog too: the new entry keeps the box ticked but no
+    password, like the account's other entries, so nothing retries it."""
+    if running_account:
+        home = await _load_home_entry(hass, _two_installation_hub())
+        hass.config_entries.async_update_entry(
+            home, data={**home.data, CONF_KEEP_PASSWORD: True}
+        )
+    with _patches(_new_sign_in_hub()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+        if not running_account:
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input={CONF_INSTALLATION: "111"}
+            )
+    assert result["step_id"] == "options"
+
+    await _reject_kept_password(hass, "typed-password")
+    if running_account:
+        assert CONF_PASSWORD not in home.data
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEEP_PASSWORD] is True
+    assert CONF_PASSWORD not in result["data"]
+
+
+async def test_add_installation_ticked_keeps_a_different_password_than_one_rejected(
+    hass,
+):
+    """Only the password Verisure rejected is dropped: the dialog's own,
+    just proven, stays when another one is rejected."""
+    with _patches(_new_sign_in_hub()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_INSTALLATION: "111"}
+        )
+
+    await _reject_kept_password(hass, "old-password")
+    result = await _finish_from_options(hass, result)
+
+    assert result["data"][CONF_PASSWORD] == "typed-password"
+
+
+@pytest.mark.parametrize("reconfigure_ticked", [True, False])
+async def test_add_installation_ticked_saves_the_password_of_a_newer_sign_in(
+    hass, reconfigure_ticked
+):
+    """A Reconfigure of the account that signs in while the dialog is still
+    open replaces the dialog's sign-in: the new entry stores the newer saved
+    sign-in and the password proven with it, as the account's other ticked
+    entries do, never the dialog's older one beside it."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    with _patches(_new_sign_in_hub()):
+        pending = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert pending["step_id"] == "options"
+    reconfigure = await _start_reconfigure_flow(hass, home)
+    replacement = _new_sign_in_hub()
+    replacement.get_refresh_token.return_value = "latest-token"
+    done, _ = await _submit_sign_in(
+        hass,
+        reconfigure["flow_id"],
+        replacement,
+        password="new-password",
+        keep_password=reconfigure_ticked,
+    )
+    assert done["reason"] == "reconfigure_successful"
+
+    created = await _finish_from_options(hass, pending)
+
+    assert created["data"][CONF_REFRESH_TOKEN] == "latest-token"
+    assert created["data"][CONF_KEEP_PASSWORD] is True
+    assert created["data"][CONF_PASSWORD] == "new-password"
 
 
 async def test_add_installation_ticked_through_a_text_message_code_signs_in(hass):

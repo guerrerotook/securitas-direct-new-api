@@ -101,6 +101,7 @@ from .const import (
     LOCK_CIRCUITS,
     PANEL_OPTION_KEYS,
 )
+from .hub import setup_passwords
 from .pin_crypto import encode_pin
 from .verisure_owa_api import (
     PERI_DEFAULTS,
@@ -1007,6 +1008,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 new_data.pop(CONF_PASSWORD, None)
             self.hass.config_entries.async_update_entry(entry, data=new_data)
+        for flow_id, config in setup_passwords(self.hass).items():
+            if flow_id != self.flow_id and config[CONF_USERNAME] == username:
+                config[CONF_PASSWORD] = self.config[CONF_PASSWORD]
         # Unticked, the user said no: the password just typed goes too.
         _sync_kept_password(
             self.hass,
@@ -1186,6 +1190,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": "cannot_connect"},
             )
 
+        self._track_setup_password()
         try:
             installations = await self.hub.client.list_installations()
         except VerisureOwaError:
@@ -1488,6 +1493,22 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if current is not None and current["hub"] is not self.hub:
             self._borrow_session(self._held_account, current)
 
+    def _track_setup_password(self) -> None:
+        """Count a ticked dialog's proven password as one more stored copy of
+        the account's kept password until the dialog creates its entry.
+
+        The entry is created pages later. Meanwhile a newer sign-in to the
+        account replaces this copy as it does the entries' copies, and
+        Verisure rejecting the password removes it, so the entry never stores
+        a password the account has moved on from.
+        """
+        if self.config.get(CONF_KEEP_PASSWORD):
+            self.hass.data[DOMAIN].setdefault("setup_passwords", {})[self.flow_id] = (
+                self.config
+            )
+        else:
+            setup_passwords(self.hass).pop(self.flow_id, None)
+
     def _release_flow_session(self) -> None:
         """Release this flow's hold; the session goes once nobody holds it."""
         if self._held_account is None:
@@ -1509,6 +1530,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         dialog counts as one. A reauth dialog does not count; its entry keeps
         the integration set up while it waits.
         """
+        setup_passwords(self.hass).pop(self.flow_id, None)
         self._release_flow_session()
         self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
 

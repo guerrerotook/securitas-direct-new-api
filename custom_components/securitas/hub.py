@@ -86,6 +86,12 @@ def _unreachable_issue_id(username: str) -> str:
     return _hashed_issue_id(_UNREACHABLE_ISSUE, username)
 
 
+def setup_passwords(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """The kept passwords open setup dialogs have proven but not yet stored,
+    by flow id; each is the dialog's own config, which its new entry copies."""
+    return hass.data.get(DOMAIN, {}).get("setup_passwords", {})
+
+
 @callback
 def raise_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
     """Tell the user in Repairs that Verisure keeps refusing the saved sign-in.
@@ -778,8 +784,9 @@ class VerisureHub:
 
     def _forget_kept_password(self, rejected: str) -> None:
         """Remove the password Verisure rejected from the entries of the
-        client's account that store it, so no restart or joining entry tries
-        it again. A different password, saved since, stays.
+        client's account that store it, and from open setup dialogs about to
+        store it, so no restart or joining entry tries it again. A different
+        password, saved since, stays.
 
         The box stays ticked: the sign-in the user is asked for next keeps the
         new password.
@@ -794,6 +801,12 @@ class VerisureHub:
             new_data = {**entry.data}
             new_data.pop(CONF_PASSWORD)
             self.hass.config_entries.async_update_entry(entry, data=new_data)
+        for config in setup_passwords(self.hass).values():
+            if (
+                config[CONF_USERNAME] == username
+                and config.get(CONF_PASSWORD) == rejected
+            ):
+                del config[CONF_PASSWORD]
         _LOGGER.warning(
             "Verisure rejected the kept password; it is no longer stored. Sign "
             "in again to keep a new one"
