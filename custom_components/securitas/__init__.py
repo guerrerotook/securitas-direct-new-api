@@ -155,6 +155,7 @@ from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     _RENEWAL_REFUSED_ISSUE,
     _SIGN_IN_ISSUE,
+    _UNREACHABLE_ISSUE,
     VerisureDevice,
     VerisureHub,
     _async_notify,
@@ -162,8 +163,11 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     _notify,
     _renewal_refused_issue_id,
     _sign_in_issue_id,
+    _unreachable_issue_id,
     clear_renewal_refused_issue,
+    clear_unreachable_issue,
     raise_renewal_refused_issue,
+    raise_unreachable_issue,
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
@@ -178,7 +182,10 @@ from .verisure_owa_api import (
     VerisureOwaError,
     generate_uuid,
 )
-from .verisure_owa_api.client._base import REFRESH_REFUSAL_ALERT_AFTER
+from .verisure_owa_api.client._base import (
+    REFRESH_REFUSAL_ALERT_AFTER,
+    UNREACHABLE_ALERT_AFTER,
+)
 from .verisure_owa_api.exceptions import dead_refresh_token_signal
 
 _LOGGER = logging.getLogger(__name__)
@@ -492,16 +499,17 @@ def _raise_sign_in_issue(
         translation_key="account_blocked" if blocked else "sign_in_again",
         translation_placeholders={"username": username},
     )
+    clear_unreachable_issue(hass, username)
 
 
 @callback
 def _clear_sign_in_issues(
     hass: HomeAssistant, username: str | None, removing: ConfigEntry | None = None
 ) -> None:
-    """Clear ``username``'s sign-in and renewal-refused issues, and those of
-    accounts no entry uses any more: signing an entry in again as another
-    account, or deleting an account's last entry, leaves nothing to sign in
-    again there.
+    """Clear ``username``'s sign-in, renewal-refused and unreachable issues,
+    and those of accounts no entry uses any more: signing an entry in again as
+    another account, or deleting an account's last entry, leaves nothing to
+    sign in again there.
 
     ``removing`` is the entry being deleted, which no longer counts.
     """
@@ -509,7 +517,9 @@ def _clear_sign_in_issues(
         issue_id
         for domain, issue_id in ir.async_get(hass).issues
         if domain == DOMAIN
-        and issue_id.startswith((_SIGN_IN_ISSUE, _RENEWAL_REFUSED_ISSUE))
+        and issue_id.startswith(
+            (_SIGN_IN_ISSUE, _RENEWAL_REFUSED_ISSUE, _UNREACHABLE_ISSUE)
+        )
     ]
     if not raised:
         return
@@ -520,9 +530,11 @@ def _clear_sign_in_issues(
         if entry_username := entry.data.get(CONF_USERNAME):
             in_use.add(_sign_in_issue_id(entry_username))
             in_use.add(_renewal_refused_issue_id(entry_username))
+            in_use.add(_unreachable_issue_id(entry_username))
     if username is not None:
         in_use.discard(_sign_in_issue_id(username))
         in_use.discard(_renewal_refused_issue_id(username))
+        in_use.discard(_unreachable_issue_id(username))
     for issue_id in raised:
         if issue_id not in in_use:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
@@ -677,21 +689,46 @@ def _clear_setup_refresh_refusals(hass: HomeAssistant, username: str) -> None:
     hass.data.get(DOMAIN, {}).get("refresh_refusals", {}).pop(username, None)
 
 
+def _note_setup_unreachable(hass: HomeAssistant, username: str) -> None:
+    """Track a setup that could not reach Verisure; raise the "can't reach
+    Verisure" notice once failures have lasted UNREACHABLE_ALERT_AFTER.
+
+    Kept in hass.data per account for the same reasons as
+    ``refresh_refusals``.
+    """
+    periods = hass.data[DOMAIN].setdefault("unreachable", {})
+    now = datetime.now(UTC)
+    period = periods.setdefault(username, {"since": now, "alerted": False})
+    if period["alerted"] or now - period["since"] < UNREACHABLE_ALERT_AFTER:
+        return
+    period["alerted"] = True
+    raise_unreachable_issue(hass, username)
+
+
+def _clear_setup_unreachable(hass: HomeAssistant, username: str) -> None:
+    """Forget the account's setup-time failures to reach Verisure once setup
+    hands back a session or the reauth or Reconfigure dialog signs in."""
+    hass.data.get(DOMAIN, {}).get("unreachable", {}).pop(username, None)
+
+
 @callback
 def _drop_unused_setup_refresh_refusals(
     hass: HomeAssistant, removing: ConfigEntry
 ) -> None:
-    """Forget setup-time refusals of accounts no entry but ``removing`` uses."""
-    refusals = hass.data.get(DOMAIN, {}).get("refresh_refusals")
-    if not refusals:
-        return
+    """Forget setup-time refusals and failures to reach Verisure of accounts
+    no entry but ``removing`` uses."""
     in_use = {
         entry.data.get(CONF_USERNAME)
         for entry in hass.config_entries.async_entries(DOMAIN)
         if entry.entry_id != removing.entry_id
     }
-    for username in set(refusals) - in_use:
-        del refusals[username]
+    domain_data = hass.data.get(DOMAIN, {})
+    for key in ("refresh_refusals", "unreachable"):
+        tracked = domain_data.get(key)
+        if not tracked:
+            continue
+        for username in set(tracked) - in_use:
+            del tracked[username]
 
 
 async def _login_or_raise(
@@ -752,6 +789,7 @@ async def _login_or_raise(
         )
         if dead_refresh_token_signal(err) is not None:
             _note_setup_refresh_refusal(hass, username)
+        _note_setup_unreachable(hass, username)
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"
         ) from None
@@ -1044,9 +1082,14 @@ async def _get_or_create_session(
     # nobody signed in to here; refusals from here on are tracked by the
     # client's renewals instead.
     _clear_setup_refresh_refusals(hass, username)
+    _clear_setup_unreachable(hass, username)
     # A raised alert outlives an adoption; the client clears it on success.
     if not (client.refresh_refusals_persisting or client.refresh_refusal_alert_raised):
         clear_renewal_refused_issue(hass, username)
+    # A reused session made no request here, so proves nothing while its
+    # client still cannot reach Verisure.
+    if signed_in or not client.unreachable_alert_raised:
+        clear_unreachable_issue(hass, username)
     # Only a sign-in made here shows the account can sign in now; a reused
     # session's token may be one Verisure has just refused.
     if signed_in:

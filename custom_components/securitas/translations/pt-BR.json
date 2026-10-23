@@ -299,6 +299,10 @@
         "renewal_refused": {
             "title": "A Verisure continua recusando o login salvo",
             "description": "Há pelo menos 15 minutos a Verisure se recusa a renovar o login salvo de {username}, então o Home Assistant não consegue se conectar ao seu alarme. Costuma ser um problema temporário da Verisure: a integração continua tentando a cada poucos minutos e se recupera sozinha se a Verisure voltar a aceitá-lo. Se isso não acontecer, entre novamente: abra Configurações → Dispositivos e Serviços → Verisure OWA, abra o menu (⋮) da entrada e escolha Reconfigurar. Este aviso some quando uma renovação ou um login funcionar."
+        },
+        "cannot_reach_verisure": {
+            "title": "O Home Assistant não consegue se conectar à Verisure",
+            "description": "Há pelo menos uma hora nenhuma solicitação do Home Assistant à Verisure para {username} funcionou. A integração continua tentando a cada poucos minutos e se recupera sozinha quando a Verisure voltar a responder. Verifique se o app da Verisure funciona e se o Home Assistant está conectado à internet. Se o app da Verisure funcionar e este aviso continuar, informe o problema com o log em {url}. Este aviso some quando uma solicitação à Verisure funcionar."
         }
     },
     "entity": {

@@ -299,6 +299,10 @@
         "renewal_refused": {
             "title": "Verisure keeps refusing the saved sign-in",
             "description": "For at least 15 minutes Verisure has refused to renew the saved sign-in for {username}, so Home Assistant can't reach your alarm. This is often a temporary problem at Verisure: the integration keeps trying every few minutes and recovers by itself if Verisure accepts it again. If it doesn't, sign in again: open Settings → Devices & services → Verisure OWA, open the menu (⋮) on the entry and choose Reconfigure. This notice clears once a renewal or sign-in succeeds."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant can't reach Verisure",
+            "description": "For at least an hour, no request from Home Assistant to Verisure for {username} has worked. The integration keeps trying every few minutes and recovers by itself once Verisure answers again. Check that the Verisure app works and that Home Assistant is online. If the Verisure app works and this notice stays, please report it with the log at {url}. This notice clears once a request to Verisure works."
         }
     },
     "entity": {

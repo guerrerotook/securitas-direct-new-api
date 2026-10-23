@@ -299,6 +299,10 @@
         "renewal_refused": {
             "title": "Verisure sigue rechazando la sesión guardada",
             "description": "Desde hace al menos 15 minutos Verisure rechaza renovar la sesión guardada de {username}, así que Home Assistant no puede conectar con tu alarma. Suele ser un problema temporal de Verisure: la integración lo sigue intentando cada pocos minutos y se recupera sola si Verisure vuelve a aceptarla. Si no es así, vuelve a iniciar sesión: abre Configuración → Dispositivos y servicios → Verisure OWA, abre el menú (⋮) de la entrada y elige Reconfigurar. Este aviso desaparece cuando una renovación o un inicio de sesión funciona."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant no puede conectar con Verisure",
+            "description": "Desde hace al menos una hora no funciona ninguna petición de Home Assistant a Verisure para {username}. La integración lo sigue intentando cada pocos minutos y se recupera sola cuando Verisure vuelve a responder. Comprueba que la app de Verisure funciona y que Home Assistant tiene conexión a internet. Si la app de Verisure funciona y este aviso sigue, informa de ello con el registro en {url}. Este aviso desaparece cuando una petición a Verisure funciona."
         }
     },
     "entity": {

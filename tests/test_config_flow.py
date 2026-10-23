@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import MethodType
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -71,7 +71,9 @@ from custom_components.securitas.const import (
 from custom_components.securitas.hub import (
     VerisureHub,
     _renewal_refused_issue_id,
+    _unreachable_issue_id,
     raise_renewal_refused_issue,
+    raise_unreachable_issue,
 )
 from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
@@ -6078,6 +6080,39 @@ async def test_signing_in_again_clears_the_accounts_renewal_refused_notice(
 
     assert result["reason"] == reason
     assert _renewal_refused_issue_ids(hass) == []
+
+
+async def test_reconfigure_clears_the_unreachable_notice(hass):
+    """The dialog's sign-in is a request to Verisure that worked: the "can't
+    reach Verisure" notice and setup's tracking of the period both go."""
+    entry = _make_reauth_entry(hass)
+    raise_unreachable_issue(hass, "test@example.com")
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, _unreachable_issue_id("test@example.com")
+    )
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data.setdefault("unreachable", {})["test@example.com"] = {
+        "since": datetime.now(UTC),
+        "alerted": True,
+    }
+    # Another account stays loaded so the flow's clean-up does not drop
+    # hass.data[DOMAIN] wholesale, which would hide a missing reset.
+    domain_data.setdefault("sessions", {})["other@example.com"] = {
+        "hub": MagicMock(),
+        "holders": {"other-account-entry-id"},
+    }
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["reason"] == "reconfigure_successful"
+    assert (
+        ir.async_get(hass).async_get_issue(
+            DOMAIN, _unreachable_issue_id("test@example.com")
+        )
+        is None
+    )
+    assert "test@example.com" not in hass.data[DOMAIN]["unreachable"]
 
 
 async def test_reconfigure_signs_in_an_entry_waiting_to_retry_a_refused_token(hass):

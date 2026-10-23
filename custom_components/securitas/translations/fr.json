@@ -299,6 +299,10 @@
         "renewal_refused": {
             "title": "Verisure refuse toujours la connexion enregistrée",
             "description": "Depuis au moins 15 minutes, Verisure refuse de renouveler la connexion enregistrée pour {username} ; Home Assistant ne peut donc plus joindre votre alarme. C'est souvent un problème passager chez Verisure : l'intégration réessaie toutes les quelques minutes et se rétablit d'elle-même dès que Verisure l'accepte à nouveau. Sinon, reconnectez-vous : ouvrez Paramètres → Appareils et services → Verisure OWA, ouvrez le menu (⋮) de l'entrée et choisissez Reconfigurer. Cette notification disparaît dès qu'un renouvellement ou une connexion réussit."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant ne parvient pas à joindre Verisure",
+            "description": "Depuis au moins une heure, aucune requête de Home Assistant vers Verisure pour {username} n'a abouti. L'intégration réessaie toutes les quelques minutes et se rétablit d'elle-même dès que Verisure répond à nouveau. Vérifiez que l'application Verisure fonctionne et que Home Assistant est connecté à Internet. Si l'application Verisure fonctionne et que cette notification persiste, signalez-le avec le journal sur {url}. Cette notification disparaît dès qu'une requête vers Verisure aboutit."
         }
     },
     "entity": {

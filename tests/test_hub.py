@@ -203,6 +203,108 @@ class TestRenewalRefusedIssue:
         assert _domain_issues(hass) == {}
 
 
+_UNREACHABLE_ID = (
+    "cannot_reach_verisure_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+)
+
+
+def _raise_sign_in_issue_for_test(hass) -> None:
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _SIGN_IN_ID,
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="sign_in_again",
+        translation_placeholders={"username": "test@example.com"},
+    )
+
+
+class TestUnreachableIssue:
+    """When the client says no request to Verisure has worked for an hour, the
+    hub raises a Repairs issue; one problem, one notice, so the refusal and
+    sign-in notices take precedence."""
+
+    _hub = staticmethod(TestRenewalRefusedIssue._hub)
+
+    async def test_unreachable_alert_raises_and_clears_the_issue(self, hass):
+        hub = self._hub(hass)
+
+        hub.client._notify_unreachable_alert(True)
+
+        issues = _domain_issues(hass)
+        assert list(issues) == [_UNREACHABLE_ID]
+        issue = issues[_UNREACHABLE_ID]
+        assert issue.translation_key == "cannot_reach_verisure"
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.is_persistent is False
+        assert issue.is_fixable is False
+        assert issue.translation_placeholders == {
+            "username": "test@example.com",
+            "url": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
+        }
+        assert "@" not in _UNREACHABLE_ID
+
+        hub.client._notify_unreachable_alert(False)
+
+        assert _domain_issues(hass) == {}
+
+    async def test_unreachable_notice_not_raised_while_refusal_notice_shows(self, hass):
+        hub = self._hub(hass)
+        hub.client._notify_refusal_alert(True)
+
+        hub.client._notify_unreachable_alert(True)
+
+        assert list(_domain_issues(hass)) == [_RENEWAL_REFUSED_ID]
+
+    async def test_unreachable_notice_not_raised_while_sign_in_notice_shows(self, hass):
+        hub = self._hub(hass)
+        _raise_sign_in_issue_for_test(hass)
+
+        hub.client._notify_unreachable_alert(True)
+
+        assert list(_domain_issues(hass)) == [_SIGN_IN_ID]
+
+    async def test_refusal_notice_removes_unreachable_notice(self, hass):
+        hub = self._hub(hass)
+        hub.client._notify_unreachable_alert(True)
+        assert list(_domain_issues(hass)) == [_UNREACHABLE_ID]
+
+        hub.client._notify_refusal_alert(True)
+
+        assert list(_domain_issues(hass)) == [_RENEWAL_REFUSED_ID]
+
+    async def test_detached_hub_does_not_raise_unreachable_notice(self, hass):
+        """Like the refusal notice: a detached hub, or one whose entry moved
+        to another account, raises nothing and clears nothing a live hub
+        raised."""
+        live = self._hub(hass)
+        retired = self._hub(hass, attached=False)
+
+        retired.client._notify_unreachable_alert(True)
+        assert _domain_issues(hass) == {}
+
+        live.client._notify_unreachable_alert(True)
+        retired.client._notify_unreachable_alert(False)
+        assert list(_domain_issues(hass)) == [_UNREACHABLE_ID]
+
+        live.client._notify_unreachable_alert(False)
+        assert live.config_entry is not None
+        hass.config_entries.async_update_entry(
+            live.config_entry, data={"username": "other@example.com"}
+        )
+        live.client._notify_unreachable_alert(True)
+        assert _domain_issues(hass) == {}
+
+    def test_unreachable_alert_raised_passes_through(self):
+        hub = make_hub()
+        hub.client.unreachable_alert_raised = True
+        assert hub.unreachable_alert_raised is True
+        hub.client.unreachable_alert_raised = False
+        assert hub.unreachable_alert_raised is False
+
+
 class TestRefreshTokenPersistence:
     """Tests that rotated refresh tokens get written to entry.data."""
 

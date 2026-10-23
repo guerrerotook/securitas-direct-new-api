@@ -50,6 +50,7 @@ from .verisure_owa_api import (
 )
 from .verisure_owa_api.client import VerisureOwaClient
 from .verisure_owa_api.client._base import (
+    _ISSUES_URL,
     RefreshTokenSnapshot,
     _token_fingerprint,
 )
@@ -60,6 +61,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _SIGN_IN_ISSUE = "sign_in_again_"
 _RENEWAL_REFUSED_ISSUE = "renewal_refused_"
+_UNREACHABLE_ISSUE = "cannot_reach_verisure_"
 
 
 def _hashed_issue_id(prefix: str, key: str) -> str:
@@ -73,6 +75,10 @@ def _sign_in_issue_id(username: str) -> str:
 
 def _renewal_refused_issue_id(username: str) -> str:
     return _hashed_issue_id(_RENEWAL_REFUSED_ISSUE, username)
+
+
+def _unreachable_issue_id(username: str) -> str:
+    return _hashed_issue_id(_UNREACHABLE_ISSUE, username)
 
 
 @callback
@@ -92,12 +98,45 @@ def raise_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
         translation_key="renewal_refused",
         translation_placeholders={"username": username},
     )
+    clear_unreachable_issue(hass, username)
 
 
 @callback
 def clear_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
     """Clear the account's renewal-refused issue, if raised."""
     ir.async_delete_issue(hass, DOMAIN, _renewal_refused_issue_id(username))
+
+
+@callback
+def raise_unreachable_issue(hass: HomeAssistant, username: str) -> None:
+    """Tell the user in Repairs that no request to Verisure has worked for an
+    hour.
+
+    One problem, one notice: not raised while the account's renewal-refused
+    or sign-in issue shows, since those failures also count here. Not
+    persistent, as the ``username`` placeholder is the email.
+    """
+    registry = ir.async_get(hass)
+    if registry.async_get_issue(
+        DOMAIN, _renewal_refused_issue_id(username)
+    ) or registry.async_get_issue(DOMAIN, _sign_in_issue_id(username)):
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _unreachable_issue_id(username),
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="cannot_reach_verisure",
+        translation_placeholders={"username": username, "url": _ISSUES_URL},
+    )
+
+
+@callback
+def clear_unreachable_issue(hass: HomeAssistant, username: str) -> None:
+    """Clear the account's "can't reach Verisure" issue, if raised."""
+    ir.async_delete_issue(hass, DOMAIN, _unreachable_issue_id(username))
 
 
 async def _async_notify(
@@ -231,6 +270,7 @@ class VerisureHub:
             refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
             on_refresh_token_changed=self._persist_refresh_token,
             on_refresh_refusal_alert=self._refresh_refusal_alert,
+            on_unreachable_alert=self._unreachable_alert,
         )
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
@@ -599,6 +639,11 @@ class VerisureHub:
         return self.client.refresh_refusal_alert_raised
 
     @property
+    def unreachable_alert_raised(self) -> bool:
+        """True from the client's unreachable alert until a request succeeds."""
+        return self.client.unreachable_alert_raised
+
+    @property
     def renewal_lock(self) -> asyncio.Lock:
         """The lock the client's token renewals hold; see the client's."""
         return self.client.renewal_lock
@@ -670,6 +715,17 @@ class VerisureHub:
         if entry is None or entry.data.get(CONF_USERNAME) != self.client.username:
             return
         raise_renewal_refused_issue(self.hass, self.client.username)
+
+    def _unreachable_alert(self, active: bool) -> None:
+        """Raise or clear the "can't reach Verisure" issue for the client's
+        account, by the same entry rules as the renewal-refused issue."""
+        entry = self.config_entry
+        if entry is None:
+            return
+        if not active:
+            clear_unreachable_issue(self.hass, self.client.username)
+        elif entry.data.get(CONF_USERNAME) == self.client.username:
+            raise_unreachable_issue(self.hass, self.client.username)
 
     def persist_current_refresh_token(self) -> None:
         """Write the current in-memory refresh token to the config entry now.

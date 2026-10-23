@@ -76,6 +76,7 @@ from custom_components.securitas.hub import (
     _async_notify,
     _notify,
     raise_renewal_refused_issue,
+    raise_unreachable_issue,
 )
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
 from custom_components.securitas.verisure_owa_api.client import _base as client_base
@@ -4058,6 +4059,141 @@ class TestSetupRefreshRefusals:
         refusals = hass.data[DOMAIN]["refresh_refusals"]
         assert ("test@example.com" in refusals) is kept
         assert "other@example.com" in refusals
+
+
+def _unreachable_issues(hass):
+    return {
+        issue_id: issue
+        for (domain, issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue_id.startswith("cannot_reach_verisure_")
+    }
+
+
+_UNREACHABLE_ISSUE_ID = (
+    "cannot_reach_verisure_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+)
+
+
+class TestSetupUnreachable:
+    """Setup that cannot reach Verisure for an hour raises the "can't reach
+    Verisure" notice. Each retry builds a fresh hub, so setup tracks the
+    period per account in hass.data, as it does refusals."""
+
+    @pytest.fixture
+    def mock_hub(self):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    _attempt = TestSetupRefreshRefusals._attempt
+
+    async def test_setup_unreachable_for_an_hour_raises_the_notice(
+        self, hass, mock_hub, clock
+    ):
+        mock_hub.login = AsyncMock(side_effect=APIConnectionError("timeout"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        clock.advance(minutes=59)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        assert _unreachable_issues(hass) == {}
+
+        clock.advance(minutes=1)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+        issues = _unreachable_issues(hass)
+        assert list(issues) == [_UNREACHABLE_ISSUE_ID]
+        assert issues[_UNREACHABLE_ISSUE_ID].translation_placeholders == {
+            "username": "test@example.com",
+            "url": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
+        }
+        assert _sign_in_issues(hass) == {}
+
+        # Raised once per period: dismissed, it does not come back.
+        ir.async_delete_issue(hass, DOMAIN, _UNREACHABLE_ISSUE_ID)
+        clock.advance(minutes=10)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        assert _unreachable_issues(hass) == {}
+
+    async def test_session_handed_back_clears_the_unreachable_notice(
+        self, hass, mock_hub, clock
+    ):
+        """A sign-in made at setup is a request that worked: the notice goes
+        and the next failure starts a fresh period."""
+        mock_hub.login = AsyncMock(side_effect=[APIConnectionError("timeout"), None])
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        clock.advance(minutes=60)
+        raise_unreachable_issue(hass, "test@example.com")
+        assert list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        assert _unreachable_issues(hass) == {}
+        assert "test@example.com" not in hass.data[DOMAIN].get("unreachable", {})
+
+    @pytest.mark.parametrize(
+        ("alert_raised", "kept"),
+        [(True, True), (False, False)],
+        ids=["alert-raised-keeps", "no-alert-clears"],
+    )
+    async def test_reused_session_keeps_the_unreachable_notice_while_alert_raised(
+        self, hass, mock_hub, alert_raised, kept
+    ):
+        """Reusing a co-tenant's session makes no request, so it proves
+        nothing while that session's client still cannot reach Verisure."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_unreachable_issue(hass, "test@example.com")
+        mock_hub.unreachable_alert_raised = alert_raised
+        mock_hub.config_entry = entry
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "test@example.com"
+        ] = {"hub": mock_hub, "holders": {"co-tenant-entry-id"}}
+        hass.data[DOMAIN].setdefault("unreachable", {})["test@example.com"] = {
+            "since": datetime.now(UTC),
+            "alerted": True,
+        }
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        mock_hub.login.assert_not_awaited()
+        assert (list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]) is kept
+        assert "test@example.com" not in hass.data[DOMAIN]["unreachable"]
+
+    async def test_removing_the_last_entry_clears_the_unreachable_notice(
+        self, hass, mock_hub
+    ):
+        mock_hub.login = AsyncMock(side_effect=APIConnectionError("timeout"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        other = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="other@example.com")
+        )
+        other.add_to_hass(hass)
+        _keep_another_account_loaded(hass, "third@example.com")
+        for failing in (entry, other):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, failing, mock_hub)
+        raise_unreachable_issue(hass, "test@example.com")
+        raise_unreachable_issue(hass, "other@example.com")
+
+        await async_remove_entry(hass, entry)
+
+        assert [
+            i.translation_placeholders["username"]
+            for i in _unreachable_issues(hass).values()
+        ] == ["other@example.com"]
+        tracking = hass.data[DOMAIN]["unreachable"]
+        assert "test@example.com" not in tracking
+        assert "other@example.com" in tracking
 
 
 # ===========================================================================

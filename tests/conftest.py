@@ -441,6 +441,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     # A spec'd property reads as a truthy MagicMock; a live token is the norm.
     hub.refresh_refusals_persisting = False
     hub.refresh_refusal_alert_raised = False
+    hub.unreachable_alert_raised = False
     for key, val in overrides.items():
         setattr(hub, key, val)
     return hub
