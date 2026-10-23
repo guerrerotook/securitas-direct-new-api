@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 
 from ..exceptions import (
     _ACCOUNT_BLOCKED_ERROR_CODE,
+    _GENUINE_AUTH_ERROR_CODES,
     APIConnectionError,
     OperationTimeoutError,
     SessionExpiredError,
@@ -66,6 +67,23 @@ def _format_graphql_error(
     return fallback
 
 
+def _is_unusable_reply(response: object) -> bool:
+    """True for an error reply that carries no data at all.
+
+    A genuine credential rejection is excluded: Verisure was reached and
+    answered.
+    """
+    if not isinstance(response, dict):
+        return False
+    errors = response.get("errors")
+    if not isinstance(errors, list) or not errors:
+        return False
+    data = response.get("data")
+    if isinstance(data, dict) and any(value is not None for value in data.values()):
+        return False
+    return _error_code_from_body(response) not in _GENUINE_AUTH_ERROR_CODES
+
+
 def _token_fingerprint(token: str | None) -> str:
     """Return a short, stable, non-reversible fingerprint of a token.
 
@@ -101,6 +119,9 @@ _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
 # between, the host is alerted and renewals slow to one per REFRESH_REFUSAL_RETRY_EVERY.
 REFRESH_REFUSAL_ALERT_AFTER = timedelta(minutes=15)
 REFRESH_REFUSAL_RETRY_EVERY = timedelta(minutes=5)
+# No request to Verisure has worked for this long, counted from the first
+# failure after the last success: the host is alerted once.
+UNREACHABLE_ALERT_AFTER = timedelta(hours=1)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
 # The open issue tracking the xSRefreshLogin server crash; the recruitment
 # WARNING points affected users straight at it.
@@ -151,6 +172,7 @@ class _ClientBase:
         refresh_token: str | None = None,
         on_refresh_token_changed: Callable[[str], None] | None = None,
         on_refresh_refusal_alert: Callable[[bool], None] | None = None,
+        on_unreachable_alert: Callable[[bool], None] | None = None,
     ) -> None:
         # Transport
         self._transport = transport
@@ -205,6 +227,10 @@ class _ClientBase:
         self._on_refresh_refusal_alert: Callable[[bool], None] | None = (
             on_refresh_refusal_alert
         )
+        # UTC, like the refusal period.
+        self._unreachable_since: datetime | None = None
+        self._unreachable_alert_raised: bool = False
+        self._on_unreachable_alert: Callable[[bool], None] | None = on_unreachable_alert
 
         # Device configuration
         self.device_id: str = device_id
@@ -654,6 +680,45 @@ class _ClientBase:
         """True from the refusal alert until a renewal succeeds."""
         return self._refusal_alert_raised
 
+    def _note_request_failure(self) -> None:
+        """Track a request Verisure gave no usable reply to; alert once."""
+        now = datetime.now(UTC)
+        since = self._unreachable_since
+        if since is None:
+            self._unreachable_since = now
+            return
+        if self._unreachable_alert_raised or now - since < UNREACHABLE_ALERT_AFTER:
+            return
+        self._unreachable_alert_raised = True
+        _LOGGER.warning(
+            "No request to Verisure has worked for %d minutes. The integration "
+            "keeps trying; check that the Verisure app works and that Home "
+            "Assistant is online.",
+            int((now - since).total_seconds() // 60),
+        )
+        self._notify_unreachable_alert(True)
+
+    def _note_request_success(self) -> None:
+        """End the unreachable period; clear the alert if it was raised."""
+        self._unreachable_since = None
+        if self._unreachable_alert_raised:
+            self._unreachable_alert_raised = False
+            self._notify_unreachable_alert(False)
+
+    def _notify_unreachable_alert(self, active: bool) -> None:
+        """Tell the host; a failing host callback must not break requests."""
+        if self._on_unreachable_alert is None:
+            return
+        try:
+            self._on_unreachable_alert(active)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning("on_unreachable_alert callback raised", exc_info=True)
+
+    @property
+    def unreachable_alert_raised(self) -> bool:
+        """True from the unreachable alert until a request succeeds."""
+        return self._unreachable_alert_raised
+
     @property
     def renewal_lock(self) -> asyncio.Lock:
         """The lock every token renewal holds.
@@ -902,9 +967,18 @@ class _ClientBase:
         them so no credential-bearing request is ever repeated by the transport.
         """
         headers = self._build_headers(operation, installation=installation)
-        return await self._transport.execute(
-            content, headers, retry_on_403=operation not in _AUTH_OPERATIONS
-        )
+        try:
+            response = await self._transport.execute(
+                content, headers, retry_on_403=operation not in _AUTH_OPERATIONS
+            )
+        except (VerisureOwaError, TimeoutError):
+            self._note_request_failure()
+            raise
+        if _is_unusable_reply(response):
+            self._note_request_failure()
+        else:
+            self._note_request_success()
+        return response
 
     # ── Poll operation ───────────────────────────────────────────────────
 
