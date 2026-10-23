@@ -66,6 +66,7 @@ from custom_components.securitas import (
     _options_are_authoritative,
     _raise_sign_in_issue,
     _store_installations_cache,
+    _sync_kept_password,
     _synced_entry_data,
     add_device_information,
     async_migrate_entry,
@@ -4907,6 +4908,50 @@ class TestKeptPasswordSync:
 
         self._assert_forgotten_but_ticked(home)
         assert office.data[CONF_PASSWORD] == "new-password"
+
+    async def test_rejection_answered_after_a_new_password_arrived_spares_it(
+        self, hass
+    ):
+        """Reconfigure saving a new password while a sign-in with the old one
+        waits for its answer: the rejection is of the old one, so the new one
+        stays in the client and in its entry."""
+        home = self._entry(hass, kept=True, password="old-password")
+        office = self._entry(hass, kept=True, password="new-password")
+        hub = self._refused_hub(hass, home, None)
+        hub.client.password = "old-password"
+        self._session(hass, hub, home.entry_id, office.entry_id)
+        sent: list[str] = []
+        in_flight = asyncio.Event()
+        answer = asyncio.Event()
+
+        async def execute(content, *_args, **_kwargs):
+            sent.append(content["variables"]["password"])
+            in_flight.set()
+            await answer.wait()
+            return login_error_reply(LOGIN_WRONG_PASSWORD)
+
+        hub.client._transport.execute = AsyncMock(side_effect=execute)
+        sign_in = asyncio.create_task(hub.client._check_authentication_token())
+        await asyncio.wait_for(in_flight.wait(), 2)
+        hass.config_entries.async_update_entry(
+            home,
+            data={
+                k: v
+                for k, v in home.data.items()
+                if k not in (CONF_PASSWORD, CONF_KEEP_PASSWORD)
+            },
+        )
+        _sync_kept_password(hass, self.USERNAME, forget_unkept=True)
+        assert hub.client.password == "new-password"
+        answer.set()
+
+        with pytest.raises(AuthenticationError):
+            await sign_in
+
+        assert sent == ["old-password"]
+        assert office.data.get(CONF_PASSWORD) == "new-password"
+        assert hub.client.password == "new-password"
+        assert hub.client.password_kept is True
 
     async def test_ticked_entries_setting_up_together_spend_one_sign_in(self, hass):
         """Each entry's setup reads its data before waiting for the account:

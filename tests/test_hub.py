@@ -763,6 +763,30 @@ class TestLogin:
             await hub.login()
         hub.client.login.assert_awaited_once()
 
+    async def test_setup_rejection_spares_a_password_swapped_in_meanwhile(self):
+        """Only the password that was sent is dropped: one put in place while
+        the sign-in was waiting for its answer stays."""
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "old-password"
+        hub.client.password_kept = True
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        rejected = MagicMock()
+        hub.client._on_kept_password_rejected = rejected
+
+        async def rejected_after_swap():
+            await asyncio.sleep(0)
+            hub.client.password = "new-password"
+            raise login_rejected_error()
+
+        hub.client.login = AsyncMock(side_effect=rejected_after_swap)
+
+        with pytest.raises(AuthenticationError):
+            await hub.login()
+        rejected.assert_called_once_with("old-password")
+        assert hub.client.password == "new-password"
+        assert hub.client.password_kept is True
+
     async def test_setup_kept_password_failing_transiently_is_kept(self):
         hub = make_hub(mock_client=False)
         hub.client.refresh_token_value = "refused-refresh-token"

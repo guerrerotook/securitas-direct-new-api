@@ -90,6 +90,7 @@ def _make_client() -> AsyncMock:
     client = AsyncMock(spec=VerisureOwaClient)
     client.protom_response = ""
     client.password = "test-password"
+    client.password_kept = False
     return client
 
 
@@ -612,7 +613,34 @@ class TestAlarmCoordinator:
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):
             await coord._async_update_data()
-        client.forget_rejected_password.assert_called_once_with(rejection)
+        client.forget_rejected_password.assert_called_once_with(
+            rejection, "test-password", kept=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_expired_rejection_names_the_password_sent(self):
+        """The rejection is of the password the relogin sent, not one put in
+        place while it waited for Verisure's answer."""
+        hass = _make_hass()
+        client = _make_client()
+        client.password = "old-password"
+        client.password_kept = True
+        rejection = AuthenticationError("credentials rejected")
+
+        async def rejected_after_swap():
+            client.password = "new-password"
+            client.password_kept = False
+            raise rejection
+
+        client.get_general_status.side_effect = SessionExpiredError("expired")
+        client.login.side_effect = rejected_after_swap
+
+        coord = self._make_coordinator(hass, client, _make_queue(), _make_installation())
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
+        client.forget_rejected_password.assert_called_once_with(
+            rejection, "old-password", kept=True
+        )
 
     @pytest.mark.asyncio
     async def test_concurrent_session_expired_relogins_spend_one_sign_in(self):
@@ -627,7 +655,7 @@ class TestAlarmCoordinator:
 
         client.login.side_effect = rejected
         client.forget_rejected_password = MagicMock(
-            side_effect=lambda _err: setattr(client, "password", "")
+            side_effect=lambda *_args, **_kwargs: setattr(client, "password", "")
         )
 
         results = await asyncio.gather(

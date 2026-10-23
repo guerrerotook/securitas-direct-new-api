@@ -1373,6 +1373,45 @@ class TestKeptPassword:
         assert client.password == ""
         rejected.assert_called_once_with("secret")
 
+    async def test_password_swapped_in_during_a_rejected_sign_in_is_kept(
+        self, mock_transport, clock
+    ):
+        """The rejection is of the password that was sent: one put in place
+        while the sign-in was waiting for its answer stays, in the client and
+        in storage."""
+        rejected = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="old-password",
+            password_kept=True,
+            on_kept_password_rejected=rejected,
+        )
+        del client.login
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        sent: list[str] = []
+        in_flight = asyncio.Event()
+        answer = asyncio.Event()
+
+        async def execute(content, headers, **kwargs):
+            sent.append(content["variables"]["password"])
+            in_flight.set()
+            await answer.wait()
+            return login_error_reply(LOGIN_WRONG_PASSWORD)
+
+        mock_transport.execute.side_effect = execute
+        poll = asyncio.create_task(_poll(client))
+        await asyncio.wait_for(in_flight.wait(), 2)
+        client.password = "new-password"
+        answer.set()
+
+        assert isinstance(await poll, AuthenticationError)
+        assert sent == ["old-password"]
+        rejected.assert_called_once_with("old-password")
+        assert client.password == "new-password"
+        assert client.password_kept is True
+
     async def test_kept_password_failing_transiently_is_kept(
         self, mock_transport, clock
     ):

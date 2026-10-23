@@ -630,30 +630,37 @@ class _ClientBase:
                                 signal,
                             )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
+            submitted, kept = self.password, self.password_kept
             try:
                 # pylint: disable=no-member  # provided by _AuthMixin
                 await self.login()  # type: ignore[attr-defined]
             except VerisureOwaError as err:
-                self.forget_rejected_password(err)
+                self.forget_rejected_password(err, submitted, kept=kept)
                 raise
 
-    def forget_rejected_password(self, err: VerisureOwaError) -> None:
+    def forget_rejected_password(
+        self, err: VerisureOwaError, password: str, *, kept: bool
+    ) -> None:
         """Stop signing in by itself with a password Verisure has rejected.
 
         Verisure blocks the account after three failed sign-ins, and every
         coordinator sharing this client would otherwise spend one. The user
         types the password again when asked to sign in again. A rejected kept
         password is passed to the host, which removes its stored copy.
+
+        ``password`` and ``kept`` describe the sign-in that was rejected and
+        must be read before it is awaited: another entry's password can be
+        put in place while it waits for Verisure's answer, and that one stays.
         """
         if not is_credential_rejection(err):
             return
-        rejected = self.password if self.password_kept else ""
-        self.password = ""
-        self.password_kept = False
-        if not rejected or self._on_kept_password_rejected is None:
+        if self.password == password:
+            self.password = ""
+            self.password_kept = False
+        if not (kept and password) or self._on_kept_password_rejected is None:
             return
         try:
-            self._on_kept_password_rejected(rejected)
+            self._on_kept_password_rejected(password)
         except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.warning("on_kept_password_rejected callback raised", exc_info=True)
 

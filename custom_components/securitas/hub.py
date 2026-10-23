@@ -369,10 +369,11 @@ class VerisureHub:
         Not used for a sign-in with no saved sign-in yet: the setup dialog
         answers an SMS code request by signing in with the same password.
         """
+        submitted, kept = self.client.password, self.client.password_kept
         try:
             await self.client.login()
         except VerisureOwaError as err:
-            self.client.forget_rejected_password(err)
+            self.client.forget_rejected_password(err, submitted, kept=kept)
             raise
 
     async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
