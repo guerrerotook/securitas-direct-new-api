@@ -793,7 +793,8 @@ def _fresh(make_refusal):
 
 
 class TestRefusalsKeepRetrying:
-    """A refusal (err 4, err 7 or the #568 crash) is never Verisure saying the token is
+    """A refusal (any error Verisure answers on xSRefreshLogin, such as err 4,
+    err 7 or the #568 crash) is never Verisure saying the token is
     invalid, so the token is never condemned: every refusal is a transient
     failure the coordinators retry. After 15 minutes of them the host is told
     once, and renewals slow to one every 5 minutes."""
@@ -982,8 +983,8 @@ class TestRefusalsKeepRetrying:
     async def test_a_stored_password_is_used_once_persisting(
         self, mock_transport, clock, make_refusal
     ):
-        """A stored password is the stronger credential: once refusals persist,
-        use it rather than keep presenting the refused token."""
+        """A password held only in memory is the stronger credential: once
+        refusals persist, use it rather than keep presenting the refused token."""
         client = _token_only_client(mock_transport, password="secret")
         client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
 

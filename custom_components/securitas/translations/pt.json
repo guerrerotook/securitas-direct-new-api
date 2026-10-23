@@ -150,7 +150,7 @@
                     },
                     "sign_in": {
                         "name": "Início de sessão",
-                        "description": "A sua palavra-passe está guardada nos ficheiros de configuração do Home Assistant para que a integração possa voltar a iniciar sessão sozinha.",
+                        "description": "Com esta caixa assinalada, a integração guarda a sua palavra-passe nos ficheiros de configuração do Home Assistant para poder voltar a iniciar sessão sozinha. Se a Verisure rejeitou a palavra-passe guardada, ela já foi removida: volte a iniciar sessão com Reconfigurar para guardar uma nova.",
                         "data": {
                             "keep_password": "Guardar a minha palavra-passe para que a integração possa voltar a iniciar sessão sozinha"
                         },

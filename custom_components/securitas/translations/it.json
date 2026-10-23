@@ -150,7 +150,7 @@
                     },
                     "sign_in": {
                         "name": "Accesso",
-                        "description": "La tua password è conservata nei file di configurazione di Home Assistant così l'integrazione può accedere di nuovo da sola.",
+                        "description": "Con questa casella spuntata, l'integrazione conserva la tua password nei file di configurazione di Home Assistant per poter accedere di nuovo da sola. Se Verisure ha rifiutato la password conservata, è già stata rimossa: accedi di nuovo con Riconfigura per conservarne una nuova.",
                         "data": {
                             "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
                         },

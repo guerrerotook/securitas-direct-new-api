@@ -3938,7 +3938,8 @@ async def test_reauth_shows_confirm_form(hass):
 
 
 async def test_reauth_confirm_valid_credentials(hass):
-    """Valid reauth captures a fresh refresh token; password is never persisted."""
+    """Valid reauth with the box unticked captures a fresh refresh token and
+    does not persist the password."""
     entry = _make_reauth_entry(hass)
     result = await _start_reauth_flow(hass, entry)
     flow_id = result["flow_id"]
@@ -5684,7 +5685,8 @@ async def test_reconfigure_asks_for_the_password_with_the_username_filled_in(has
 
 
 async def test_reconfigure_saves_a_fresh_login_without_the_password(hass):
-    """Reconfigure saves the new refresh token, not the password, and reloads."""
+    """Reconfigure with the box unticked saves the new refresh token, not the
+    password, and reloads."""
     entry = _make_reauth_entry(hass)
     result = await _start_reconfigure_flow(hass, entry)
 

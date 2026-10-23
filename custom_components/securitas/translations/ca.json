@@ -150,7 +150,7 @@
                     },
                     "sign_in": {
                         "name": "Inici de sessió",
-                        "description": "La vostra contrasenya es desa als fitxers de configuració de Home Assistant perquè la integració pugui tornar a iniciar la sessió per si sola.",
+                        "description": "Amb aquesta casella marcada, la integració desa la vostra contrasenya als fitxers de configuració de Home Assistant per poder tornar a iniciar la sessió per si sola. Si Verisure ha rebutjat la contrasenya desada, ja s'ha eliminat: torneu a iniciar la sessió amb Reconfigura per desar-ne una de nova.",
                         "data": {
                             "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
                         },

@@ -150,7 +150,7 @@
                     },
                     "sign_in": {
                         "name": "Inicio de sesión",
-                        "description": "Su contraseña se guarda en los archivos de configuración de Home Assistant para que la integración pueda volver a iniciar sesión por sí sola.",
+                        "description": "Con esta casilla marcada, la integración guarda su contraseña en los archivos de configuración de Home Assistant para poder volver a iniciar sesión por sí sola. Si Verisure rechazó la contraseña guardada, ya se ha eliminado: vuelva a iniciar sesión con Reconfigurar para guardar una nueva.",
                         "data": {
                             "keep_password": "Guardar mi contraseña para que la integración pueda volver a iniciar sesión por sí sola"
                         },

@@ -177,7 +177,7 @@
                     },
                     "sign_in": {
                         "name": "Sign-in",
-                        "description": "Your password is kept in Home Assistant's configuration files so the integration can sign in again by itself.",
+                        "description": "With this ticked, the integration keeps your password in Home Assistant's configuration files so it can sign in again by itself. If Verisure rejected the kept password, it has already been removed: sign in again with Reconfigure to keep a new one.",
                         "data": {
                             "keep_password": "Keep my password so the integration can sign in again by itself"
                         },

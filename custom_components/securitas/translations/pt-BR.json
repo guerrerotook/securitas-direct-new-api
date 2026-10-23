@@ -150,7 +150,7 @@
                     },
                     "sign_in": {
                         "name": "Login",
-                        "description": "Sua senha está guardada nos arquivos de configuração do Home Assistant para que a integração possa fazer login de novo sozinha.",
+                        "description": "Com esta caixa marcada, a integração guarda sua senha nos arquivos de configuração do Home Assistant para poder fazer login de novo sozinha. Se a Verisure rejeitou a senha guardada, ela já foi removida: faça login de novo com Reconfigurar para guardar uma nova.",
                         "data": {
                             "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
                         },

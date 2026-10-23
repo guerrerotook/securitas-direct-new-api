@@ -3798,8 +3798,8 @@ _ALERT_LOG = "Verisure has refused to renew the saved sign-in"
 
 
 class TestSetupRefreshRefusals:
-    """Verisure refusing the stored token at setup (err 4 or err 7, or the #568
-    refresh-login crash) is retried for as long as it lasts, never turned into
+    """Verisure refusing the stored token at setup (any error Verisure answers
+    on xSRefreshLogin, such as err 4, err 7 or the #568 crash) is retried for as long as it lasts, never turned into
     a reauth prompt.
 
     Once refusals have lasted 15 minutes a Repairs notice says how to sign in

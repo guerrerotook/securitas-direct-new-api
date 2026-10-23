@@ -31,6 +31,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DOMAIN,
+    PROJECT_URL,
     SIGNAL_CAMERA_STATE,
 )
 from .log_filter import SensitiveDataFilter
@@ -51,7 +52,6 @@ from .verisure_owa_api import (
 )
 from .verisure_owa_api.client import VerisureOwaClient
 from .verisure_owa_api.client._base import (
-    _ISSUES_URL,
     RefreshTokenSnapshot,
     _token_fingerprint,
 )
@@ -134,7 +134,10 @@ def raise_unreachable_issue(hass: HomeAssistant, username: str) -> None:
         is_persistent=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key="cannot_reach_verisure",
-        translation_placeholders={"username": username, "url": _ISSUES_URL},
+        translation_placeholders={
+            "username": username,
+            "url": f"{PROJECT_URL}/issues",
+        },
     )
 
 

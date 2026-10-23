@@ -150,7 +150,7 @@
                     },
                     "sign_in": {
                         "name": "Connexion",
-                        "description": "Votre mot de passe est conservé dans les fichiers de configuration de Home Assistant pour que l'intégration puisse se reconnecter d'elle-même.",
+                        "description": "Avec cette case cochée, l'intégration conserve votre mot de passe dans les fichiers de configuration de Home Assistant pour pouvoir se reconnecter d'elle-même. Si Verisure a rejeté le mot de passe conservé, il a déjà été supprimé : reconnectez-vous avec Reconfigurer pour en conserver un nouveau.",
                         "data": {
                             "keep_password": "Conserver mon mot de passe pour que l'intégration puisse se reconnecter d'elle-même"
                         },

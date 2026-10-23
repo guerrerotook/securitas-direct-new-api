@@ -546,8 +546,8 @@ def _login_auth_error(error: dict) -> AuthenticationError:
 
 
 class TestIsCredentialRejection:
-    """Only Verisure's verdict on the credentials counts; a server fault that
-    login() also raises as AuthenticationError does not."""
+    """Only Verisure's verdict on the credentials counts: a server fault in the
+    reply does not, even on an AuthenticationError."""
 
     @pytest.mark.parametrize(
         "make_error",
@@ -561,7 +561,7 @@ class TestIsCredentialRejection:
         assert is_credential_rejection(make_error()) is True
 
     @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
-    def test_server_faults_are_not_verdicts_but_still_ask_to_sign_in(self, fault):
+    def test_server_faults_are_not_verdicts_even_as_authentication_error(self, fault):
         err = _login_auth_error(LOGIN_SERVER_FAULTS[fault])
         assert is_credential_rejection(err) is False
         assert is_genuine_auth_failure(err) is True
