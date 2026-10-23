@@ -69,16 +69,16 @@ def _format_graphql_error(
 
 
 def _is_unusable_reply(response: object) -> bool:
-    """True for an error reply that carries no data at all.
+    """True for a reply that carries no data value at all, with or without
+    errors (in list or dict form).
 
-    A genuine credential rejection is excluded: Verisure was reached and
-    answered.
+    No operation can use one: every typed envelope requires its field, the
+    raw readers raise on a null one, and get_services treats a null catalog
+    as "retry next poll". A genuine credential rejection is excluded:
+    Verisure was reached and answered.
     """
     if not isinstance(response, dict):
-        return False
-    errors = response.get("errors")
-    if not isinstance(errors, list) or not errors:
-        return False
+        return True
     data = response.get("data")
     if isinstance(data, dict) and any(value is not None for value in data.values()):
         return False

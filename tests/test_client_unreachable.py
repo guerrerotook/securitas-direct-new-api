@@ -250,6 +250,55 @@ async def test_error_reply_with_null_data_is_a_failure(mock_transport, clock):
     assert client._unreachable_since == clock.utc
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param(
+            {"errors": {"data": {"reason": "backend unavailable"}}, "data": None},
+            id="dict-form-errors",
+        ),
+        pytest.param({"data": {"xSInstallations": None}}, id="null-field"),
+        pytest.param({"data": None}, id="null-data"),
+        pytest.param({}, id="empty"),
+    ],
+)
+async def test_reply_the_client_rejects_keeps_the_alert(mock_transport, clock, reply):
+    """A reply the client cannot use is no sign Verisure works: the alert
+    stays raised while the request fails."""
+    alerts: list[bool] = []
+    client = _client(mock_transport, alerts)
+    mock_transport.execute.side_effect = APIConnectionError("down")
+    await _fail_at(client, clock, alerts, [0, 60])
+    assert client.unreachable_alert_raised is True
+    mock_transport.execute.side_effect = None
+    mock_transport.execute.return_value = reply
+
+    with pytest.raises(VerisureOwaError):
+        await client.list_installations()
+
+    assert client.unreachable_alert_raised is True
+    assert alerts == [True]
+
+
+@pytest.mark.parametrize("reply", [None, [], "OK"], ids=["null", "list", "string"])
+async def test_reply_that_is_not_an_object_is_a_failure(mock_transport, clock, reply):
+    client = _client(mock_transport, [])
+    mock_transport.execute.return_value = reply
+
+    await _status_poll(client)
+
+    assert client._unreachable_since == clock.utc
+
+
+async def test_reply_with_null_data_and_no_errors_is_a_failure(mock_transport, clock):
+    client = _client(mock_transport, [])
+    mock_transport.execute.return_value = {"data": {"xSCheckAlarmStatus": None}}
+
+    await _status_poll(client)
+
+    assert client._unreachable_since == clock.utc
+
+
 async def test_pacing_error_is_not_a_failure(mock_transport, clock):
     alerts: list[bool] = []
     client = _client(mock_transport, alerts)
