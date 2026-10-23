@@ -12,6 +12,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 ### Changed
 
 - **Any error Verisure sends back about renewing the saved sign-in now counts as a refusal** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): until now only a few known errors did, so a new one left your devices unavailable with no notice, retried in silence. Now any such error counts, apart from Verisure's own timeouts and server errors, which are still treated as ordinary outages. After 15 minutes of refusals the notice in **Settings → Repairs** tells you, and explains how to sign in again with **Reconfigure**. Thanks to [@dfischer0](https://github.com/dfischer0) for the report and the log.
+- **A problem at Verisure's end while signing in with your password no longer counts as a wrong password** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): when Verisure times out or has a server error while the integration signs in with your password, the integration now treats it as a passing problem and tries again, instead of saying your password is wrong and asking you to sign in again. The setup dialog says it can't connect rather than "invalid credentials".
 
 ## v5.9.4
 

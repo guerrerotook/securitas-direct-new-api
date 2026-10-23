@@ -100,7 +100,7 @@ If you have several installations on one Verisure account, they share one sign-i
 There are two ways, and both delete the stored password at once:
 
 - **Reconfigure** from the entry's three-dot menu: untick the box and sign in.
-- **Configure** on the entry: while the password is kept, the settings screen has a **Sign-in** section with the same tick box. Untick it and finish the dialog. This doesn't sign in, so it works even while Home Assistant can't reach Verisure.
+- **Configure** on the entry: while the box is ticked, the settings screen has a **Sign-in** section with the same tick box. Untick it and finish the dialog. This doesn't sign in, so it works even while Home Assistant can't reach Verisure.
 
 To keep your password again later, use **Reconfigure**, where you type it. With several installations on one account, untick it on each of them to stop the shared sign-in using it.
 
