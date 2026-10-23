@@ -213,7 +213,7 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
 
     Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
     "try again later" session error, and unrecognised null-data GraphQL errors
-    such as an xSRefreshLogin server crash or err 4 rejection, however often
+    such as an xSRefreshLogin server crash or err 4 / err 7 rejection, however often
     it repeats -- is transient and must NOT trigger a reauth prompt. Unknown
     failures default to transient.
     """
@@ -254,19 +254,23 @@ def is_refresh_login_crash(err: VerisureOwaError) -> bool:
     return on_refresh_login and is_null_deref
 
 
-def is_refresh_token_rejected(err: VerisureOwaError) -> bool:
-    """True when ``xSRefreshLogin`` refuses the stored token with error code 4.
+_REFRESH_REFUSAL_ERROR_CODES: frozenset[str] = frozenset({"4", "7"})
 
-    The error arrives with status 404, but only the path and code are checked.
-    Seen when Verisure revoked a session server-side: every renewal with that
-    token was refused this way for a day, until a fresh sign-in.
+
+def is_refresh_token_rejected(err: VerisureOwaError) -> bool:
+    """True when ``xSRefreshLogin`` refuses the stored token with error code 4
+    or 7.
+
+    Error 4 arrives with status 404 and error 7 with status 401, but only the
+    path and code are checked. Both were seen refusing every renewal with the
+    stored token, for hours or a day, until a fresh sign-in (#652 for err 7).
     """
     first = _first_error(err.response_body)
     if first is None:
         return False
     path = first.get("path")
     on_refresh_login = isinstance(path, list) and "xSRefreshLogin" in path
-    return on_refresh_login and _error_code(err) == "4"
+    return on_refresh_login and _error_code(err) in _REFRESH_REFUSAL_ERROR_CODES
 
 
 def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
@@ -278,5 +282,5 @@ def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
     if is_refresh_login_crash(err):
         return "refresh-login crash"
     if is_refresh_token_rejected(err):
-        return "refresh-token rejection (err 4)"
+        return f"refresh-token rejection (err {_error_code(err)})"
     return None

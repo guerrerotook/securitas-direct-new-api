@@ -96,6 +96,7 @@ from tests.conftest import (
     make_securitas_hub_mock,
     refresh_login_crash_error,
     refresh_response,
+    refresh_token_refused_err7_error,
     refresh_token_rejected_error,
 )
 from tests.test_hub import make_hub
@@ -3709,15 +3710,19 @@ def _keep_another_account_loaded(hass, username="other@example.com") -> None:
 
 _REFUSALS = pytest.mark.parametrize(
     "make_refusal",
-    [refresh_token_rejected_error, refresh_login_crash_error],
-    ids=["err4", "crash"],
+    [
+        refresh_token_rejected_error,
+        refresh_token_refused_err7_error,
+        refresh_login_crash_error,
+    ],
+    ids=["err4", "err7", "crash"],
 )
 
 _ALERT_LOG = "Verisure has refused to renew the saved sign-in"
 
 
 class TestSetupRefreshRefusals:
-    """Verisure refusing the stored token at setup (err 4, or the #568
+    """Verisure refusing the stored token at setup (err 4 or 7, or the #568
     refresh-login crash) is retried for as long as it lasts, never turned into
     a reauth prompt.
 

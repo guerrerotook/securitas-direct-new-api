@@ -32,6 +32,7 @@ from .conftest import (
     make_jwt,
     refresh_login_crash_error,
     refresh_response,
+    refresh_token_refused_err7_error,
     refresh_token_rejected_error,
     validate_device_response,
 )
@@ -681,8 +682,12 @@ def clock(monkeypatch):
 
 REFUSALS = pytest.mark.parametrize(
     "make_refusal",
-    [refresh_token_rejected_error, refresh_login_crash_error],
-    ids=["err4", "crash"],
+    [
+        refresh_token_rejected_error,
+        refresh_token_refused_err7_error,
+        refresh_login_crash_error,
+    ],
+    ids=["err4", "err7", "crash"],
 )
 
 
@@ -747,7 +752,7 @@ def _fresh(make_refusal):
 
 
 class TestRefusalsKeepRetrying:
-    """A refusal (err 4 or the #568 crash) is never Verisure saying the token is
+    """A refusal (err 4, err 7 or the #568 crash) is never Verisure saying the token is
     invalid, so the token is never condemned: every refusal is a transient
     failure the coordinators retry. After 15 minutes of them the host is told
     once, and renewals slow to one every 5 minutes."""

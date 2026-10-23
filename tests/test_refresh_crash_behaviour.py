@@ -10,7 +10,7 @@ untouched. However long the crashes last, they are retried, never turned into
 reauth (see REFRESH_REFUSAL_ALERT_AFTER in the client); these tests guard
 against a crash being turned into a reauth trigger or corrupting the stored
 token. TestRefreshTokenRejectedHandling applies the same checks to
-a single err 4 refusal of the stored token.
+a single err 4 or err 7 refusal of the stored token.
 """
 
 from __future__ import annotations
@@ -24,7 +24,11 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     is_refresh_token_rejected,
 )
 
-from .conftest import refresh_crash_response, refresh_token_rejected_response
+from .conftest import (
+    refresh_crash_response,
+    refresh_token_refused_err7_response,
+    refresh_token_rejected_response,
+)
 
 FR_CRASH_RESPONSE = refresh_crash_response()
 
@@ -84,12 +88,18 @@ class TestRefreshCrashHandling:
 
 
 class TestRefreshTokenRejectedHandling:
-    """The err 4 / 404 refusal reaches the refusal tracking recognisably."""
+    """The err 4 / 404 and err 7 / 401 refusals reach the refusal tracking
+    recognisably."""
 
+    @pytest.mark.parametrize(
+        "response",
+        [refresh_token_rejected_response, refresh_token_refused_err7_response],
+        ids=["err4", "err7"],
+    )
     async def test_raw_reply_raises_a_recognised_rejection(
-        self, mock_transport
+        self, mock_transport, response
     ) -> None:
-        mock_transport.execute.return_value = refresh_token_rejected_response()
+        mock_transport.execute.return_value = response()
         client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
 
         with pytest.raises(VerisureOwaError) as excinfo:

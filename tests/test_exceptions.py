@@ -27,7 +27,11 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     is_refresh_token_rejected,
 )
 
-from .conftest import refresh_login_crash_error, refresh_token_rejected_error
+from .conftest import (
+    refresh_login_crash_error,
+    refresh_token_refused_err7_error,
+    refresh_token_rejected_error,
+)
 
 # ── Subclass checks ───────────────────────────────────────────────────────────
 
@@ -375,6 +379,15 @@ class TestIsRefreshTokenRejected:
     def test_err_4_on_refresh_login_matches(self):
         assert is_refresh_token_rejected(refresh_token_rejected_error()) is True
 
+    def test_err_7_on_refresh_login_matches(self):
+        """#652: Verisure refused renewals with err 7 / 401 until a new sign-in."""
+        assert is_refresh_token_rejected(refresh_token_refused_err7_error()) is True
+
+    def test_err_7_on_a_different_path_does_not_match(self):
+        err = refresh_token_refused_err7_error()
+        err.response_body["errors"][0]["path"] = ["xSArmPanel"]
+        assert is_refresh_token_rejected(err) is False
+
     def test_err_4_on_a_different_path_does_not_match(self):
         err = refresh_token_rejected_error()
         err.response_body["errors"][0]["path"] = ["xSArmPanel"]
@@ -418,6 +431,11 @@ class TestDeadRefreshTokenSignal:
     def test_err_4_rejection_is_named(self):
         assert dead_refresh_token_signal(refresh_token_rejected_error()) == (
             "refresh-token rejection (err 4)"
+        )
+
+    def test_err_7_refusal_is_named(self):
+        assert dead_refresh_token_signal(refresh_token_refused_err7_error()) == (
+            "refresh-token rejection (err 7)"
         )
 
     def test_genuine_invalid_session_is_not_a_signal(self):
@@ -464,7 +482,12 @@ class TestRefusalsNeverAskForReauth:
         assert not hasattr(exceptions, "RefreshTokenDeadError")
 
     @pytest.mark.parametrize(
-        "make_err", [refresh_login_crash_error, refresh_token_rejected_error]
+        "make_err",
+        [
+            refresh_login_crash_error,
+            refresh_token_rejected_error,
+            refresh_token_refused_err7_error,
+        ],
     )
     def test_refusal_is_not_genuine(self, make_err):
         assert is_genuine_auth_failure(make_err()) is False

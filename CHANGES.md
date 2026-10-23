@@ -4,6 +4,12 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.10.0
 
+## v5.9.4
+
+### Fixed
+
+- **No notice when Verisure kept refusing the saved sign-in with "Il y a eu une erreur. Veuillez réessayer ultérieurement."** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): Verisure can refuse to renew the saved sign-in with an error that says "try again later" and keep doing so for hours, while its own apps still work. The integration took this for a short outage, so it retried in silence and your devices stayed unavailable until you signed in again yourself. It is now handled like the other refusals fixed in 5.9.3: after 15 minutes a notice in **Settings → Repairs** tells you, and explains how to sign in again from the entry's **⋮** menu with **Reconfigure**. The notice clears itself once Verisure accepts the sign-in again. Thanks to [@dfischer0](https://github.com/dfischer0) for the report and the log.
+
 ## v5.9.3
 
 ### Fixed

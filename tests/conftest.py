@@ -192,6 +192,34 @@ def refresh_token_rejected_error() -> VerisureOwaError:
     return err
 
 
+def refresh_token_refused_err7_response() -> dict:
+    """Build the xSRefreshLogin ``err 7`` / 401 refusal, as returned (#652).
+
+    Verisure answered every renewal this way for seven hours while its own
+    apps worked; signing in again ended it.
+    """
+    message = "Il y a eu une erreur. Veuillez réessayer ultérieurement. "
+    return {
+        "errors": [
+            {
+                "message": message,
+                "name": "ApiError",
+                "data": {"res": "ERROR", "err": "7", "status": 401},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+
+
+def refresh_token_refused_err7_error() -> VerisureOwaError:
+    """Build the xSRefreshLogin ``err 7`` refusal as refresh_token() raises it."""
+    body = refresh_token_refused_err7_response()
+    err = VerisureOwaError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
+
+
 def refresh_response(
     *,
     hash_token: str | None = None,
