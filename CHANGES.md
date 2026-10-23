@@ -4,6 +4,15 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.10.0
 
+### Added
+
+- **Optional tick box to keep your password, so the integration can sign in again by itself** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): the setup, sign-in-again and **Reconfigure** screens have a **Keep my password** tick box, off by default. With it ticked, when Verisure refuses the saved sign-in the integration signs in with your password straight away, also after a restart, instead of waiting for you. The cost is that your password is stored unencrypted in Home Assistant's configuration files and backups, where anyone who can read them can read it. If Verisure rejects the kept password, the integration stops using it, removes it and asks you to sign in again; the password you type then is kept. To turn it off, untick it in **Reconfigure**, or in the **Sign-in** section of the entry's **Configure** screen, which works even while Verisure can't be reached; the stored password is deleted at once. See [Keeping your password](https://github.com/guerrerotook/securitas-direct-new-api#keeping-your-password). Thanks to [@dfischer0](https://github.com/dfischer0) for the report and the log.
+- **A notice when Home Assistant can't reach Verisure** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): when no request to Verisure has worked for an hour, a notice in **Settings → Repairs** says so and suggests checking that the Verisure app works and that Home Assistant is online. It clears itself as soon as a request works, and doesn't show while a notice about signing in already explains the problem. See [How signing in works](https://github.com/guerrerotook/securitas-direct-new-api#how-signing-in-works).
+
+### Changed
+
+- **Any error Verisure sends back about renewing the saved sign-in now counts as a refusal** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): until now only a few known errors did, so a new one left your devices unavailable with no notice, retried in silence. Now any such error counts, apart from Verisure's own timeouts and server errors, which are still treated as ordinary outages. After 15 minutes of refusals the notice in **Settings → Repairs** tells you, and explains how to sign in again with **Reconfigure**. Thanks to [@dfischer0](https://github.com/dfischer0) for the report and the log.
+
 ## v5.9.4
 
 ### Fixed

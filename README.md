@@ -19,7 +19,7 @@ Bundled Lovelace UI: Tile open-sensor feature, camera card, activity-log card, a
 
 The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as an event entity, a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
 
-Multiple installations per account work out of the box. 2FA is handled at setup. Your password isn't stored on disk — it gets used once to mint a refresh token, then discarded.
+Multiple installations per account work out of the box. 2FA is handled at setup. Your password isn't stored unless you choose to keep it: by default it is used once to get a saved sign-in, then discarded. See [How signing in works](#how-signing-in-works).
 
 ## Supported Countries
 
@@ -57,9 +57,52 @@ Go to **Settings → Integrations → Add Integration** and search for **Verisur
 
 The wizard handles login (with SMS 2FA if your account uses it), picks an installation if your account has more than one, walks through PIN / notifications / sub-panel options, and lets you map each HA alarm button to a Verisure mode. Repeat the flow once per installation if you have several. Locks and cameras are discovered in the background — the **Lock automation** screen appears under **Configure** once they're registered.
 
+The sign-in screen has a **Keep my password** tick box, off by default. Read [How signing in works](#how-signing-in-works) before you tick it: it decides what happens when Verisure refuses the saved sign-in, and it stores your password unencrypted.
+
 ### Naming: `securitas` vs `verisure_owa`
 
 The integration's HA domain is `securitas` for historical reasons, but every service, event, and card name is also registered under `verisure_owa.*` / `verisure_owa_*` — use that form when you write new automations. Old `securitas.*` automations keep working. See [`docs/FUTURE_MIGRATION_PLAN.md`](docs/FUTURE_MIGRATION_PLAN.md) for why this is unresolved.
+
+## How signing in works
+
+You type your Verisure password once, at setup. The integration uses it to get a *saved sign-in* from Verisure, a long-lived token that lets it reconnect without the password, and then discards the password. From then on the integration renews the saved sign-in by itself, so most people never have to sign in again.
+
+### When Verisure refuses the saved sign-in
+
+Now and then Verisure refuses to renew the saved sign-in, sometimes for hours, while its own app keeps working. This is often a temporary problem at Verisure, so the integration doesn't give up: it keeps trying every few minutes, and your devices show as unavailable in the meantime. Any error Verisure sends back about the renewal itself counts as a refusal. Verisure's own timeouts and server errors don't: those are ordinary outages, and the integration simply retries.
+
+When the refusals have lasted 15 minutes, a notice in **Settings → Repairs** titled **Verisure keeps refusing the saved sign-in** tells you. You can wait for Verisure to recover, or fix it yourself straight away: go to **Settings → Devices & services → Verisure OWA**, open the three-dot menu on the entry, choose **Reconfigure** and enter your password. The integration gets a fresh saved sign-in and reloads, and your entities and settings stay as they are. The notice clears itself once a renewal or a sign-in works.
+
+This is different from Verisure rejecting the saved sign-in outright, for example once it has expired. Then there is nothing to wait for, so the integration asks you to sign in again at once.
+
+### When Home Assistant can't reach Verisure
+
+A second notice, **Home Assistant can't reach Verisure**, appears when no request to Verisure has worked for an hour. It isn't about signing in, and signing in again won't fix it: either Verisure is down or Home Assistant can't get online. Check that the Verisure app works and that Home Assistant has an internet connection. The integration keeps trying, and the notice clears itself as soon as a request to Verisure works. If the Verisure app works and the notice stays, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your log.
+
+You won't see it while the refusal notice or a request to sign in again is showing, because those already explain why nothing works.
+
+### Keeping your password
+
+The setup, sign-in-again and **Reconfigure** screens have a tick box, **Keep my password so the integration can sign in again by itself**. It is off by default.
+
+With it ticked, the integration doesn't wait out a refusal. As soon as Verisure refuses the saved sign-in, it signs in with your password instead, and it does the same after a restart. Usually you won't notice anything happened.
+
+The cost is that your password is stored **unencrypted** in Home Assistant's configuration files, and so in every backup of them. Anyone who can read those files or a backup can read your Verisure password, and with it use the Verisure app or website as you. Without the tick, Home Assistant keeps only the saved sign-in, which works only for Verisure and can be cancelled.
+
+Tick it if a long disconnection would cost you more than that risk: a holiday home where nobody can sign in again for days, say, or automations that must be able to arm the alarm. Leave it off if other people can read your Home Assistant files or backups, if your backups go somewhere you don't control, or if you use the same password anywhere else.
+
+If Verisure rejects the kept password (because you changed it, the account is blocked, or Verisure wants an SMS code), the integration stops using it straight away, since Verisure blocks an account after a few failed sign-ins. It removes the password from storage and asks you to sign in again. The box stays ticked, so the password you type then is the one kept. A problem at Verisure's end during that sign-in doesn't count: the password stays and the integration tries again later.
+
+If you have several installations on one Verisure account, they share one sign-in, and if any of them keeps the password, that shared sign-in can use it. Adding another installation of an account that is already set up, with the box ticked, checks the password by signing in with it.
+
+#### Turning it off
+
+There are two ways, and both delete the stored password at once:
+
+- **Reconfigure** from the entry's three-dot menu: untick the box and sign in.
+- **Configure** on the entry: while the password is kept, the settings screen has a **Sign-in** section with the same tick box. Untick it and finish the dialog. This doesn't sign in, so it works even while Home Assistant can't reach Verisure.
+
+To keep your password again later, use **Reconfigure**, where you type it. With several installations on one account, untick it on each of them to stop the shared sign-in using it.
 
 ## Options
 
@@ -81,6 +124,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
 | | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
 | **Activity Log and Events** | Poll the activity log once per minute in the background | No | Off by default: the log refreshes on demand from the card, and remote events (someone arming at the panel, an intrusion, a power cut) don't fire on the `verisure_owa_activity` bus. Turn it on if you want every event to fire — see [How often it refreshes](#how-often-it-refreshes). |
+| **Sign-in** _(only while your password is kept)_ | Keep my password so the integration can sign in again by itself | Yes | Untick and save to delete the stored password at once, without signing in. To keep it again, use **Reconfigure**. See [Keeping your password](#keeping-your-password). |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 | | Operation poll timeout | 120s | How long to wait for the panel to confirm an arm/disarm action before treating it as accepted-but-unconfirmed (range 60–300s). Raise this if arm/disarm operations log `not confirmed within timeout` warnings. |
@@ -708,7 +752,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 - **Arm/disarm logs `not confirmed within timeout`** — On a slow or congested backend the panel can accept an arm/disarm but not confirm it within the poll window. The integration shows the **intended** state provisionally (with a "… not confirmed" notification) and reconciles automatically on the next status read — it no longer reverts to the previous state or reports a hard failure. If this happens often, raise the **Operation poll timeout** under **Configure → Advanced**.
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
-- **Devices unavailable, but you were never asked to sign in again** — When Verisure rejects your saved login outright, the integration asks you to sign in again. When Verisure only keeps refusing to renew it, the integration keeps trying, and after 15 minutes a notice in **Settings → Repairs** says so. You don't have to wait for either. Go to **Settings → Devices & services → Verisure OWA**, open the three-dot menu on the entry, choose **Reconfigure**, and enter your Verisure password. The integration saves a fresh login and reloads; your entities and settings stay as they are.
+- **Devices unavailable, but you were never asked to sign in again** — When Verisure rejects your saved sign-in outright, the integration asks you to sign in again. When Verisure only refuses to renew it, with any error about the renewal itself, the integration keeps trying, and after 15 minutes a notice in **Settings → Repairs** says so. If instead no request to Verisure has worked for an hour, the notice says Home Assistant can't reach Verisure; signing in again won't help with that one. For a refusal you don't have to wait: go to **Settings → Devices & services → Verisure OWA**, open the three-dot menu on the entry, choose **Reconfigure**, and enter your Verisure password. The integration saves a fresh sign-in and reloads; your entities and settings stay as they are. To have the integration do this by itself, see [Keeping your password](#keeping-your-password) and its cost. More in [How signing in works](#how-signing-in-works).
 - **2FA issues** — If 2FA fails, sign in again with **Reconfigure** from the entry's three-dot menu; if Verisure asks for a code, you'll get a new SMS. If that doesn't help, remove and re-add the integration. If that doesn't work either, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.
 - **Switching from IPv4 to IPv6** — The address family is chosen once, when the integration signs in. If Home Assistant switches from IPv4 to IPv6 afterwards, restart Home Assistant so Verisure reconnects.
 
