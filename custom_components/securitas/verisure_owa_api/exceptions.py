@@ -282,13 +282,12 @@ def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
     Any error Verisure answers on the ``xSRefreshLogin`` path is a refusal,
     whatever its code, unless it is a genuine credential failure, Verisure's
     own timeout reply, or carries a 5xx ``data.status`` (a server fault, not
-    a verdict on the saved sign-in).
+    a verdict on the saved sign-in). The #568 resolver crash is a refusal
+    only when none of those applies.
 
     Always transient: the client and setup keep retrying and, once refusals
     have lasted ``REFRESH_REFUSAL_ALERT_AFTER``, alert the user instead.
     """
-    if is_refresh_login_crash(err):
-        return "refresh-login crash"
     first = _first_error(err.response_body)
     if first is None:
         return None
@@ -297,8 +296,10 @@ def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
         return None
     if is_genuine_auth_failure(err):
         return None
-    if _is_server_fault(first):
+    if _is_reported_server_fault(first):
         return None
+    if is_refresh_login_crash(err):
+        return "refresh-login crash"
     code = _error_code(err)
     if code is not None:
         return f"refresh-token rejection (err {code})"
@@ -334,15 +335,21 @@ def is_server_fault_reply(body: object) -> bool:
 def _is_server_fault(first: dict[str, Any]) -> bool:
     """True when an error reports Verisure's own fault, not a verdict: its
     timeout reply, a 5xx ``data.status``, or a resolver crash."""
+    if _is_reported_server_fault(first):
+        return True
+    message = first.get("message")
+    return isinstance(message, str) and _NULL_DEREF in message
+
+
+def _is_reported_server_fault(first: dict[str, Any]) -> bool:
+    """True when an error says outright that Verisure failed: its timeout
+    reply or a 5xx ``data.status``."""
     data = first.get("data")
     if not isinstance(data, dict):
         data = {}
     if first.get("name") == "TimeoutError" or data.get("err") == "TimeoutError":
         return True
-    if _server_status(data.get("status")):
-        return True
-    message = first.get("message")
-    return isinstance(message, str) and _NULL_DEREF in message
+    return _server_status(data.get("status"))
 
 
 def _server_status(status: object) -> bool:

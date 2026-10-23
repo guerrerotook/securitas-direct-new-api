@@ -1253,6 +1253,20 @@ class TestKeptPassword:
         client.login.assert_awaited_once()
         alerts.assert_not_called()
 
+    async def test_crash_with_a_server_status_does_not_spend_the_kept_password(
+        self, mock_transport, clock
+    ):
+        crash = refresh_login_crash_error()
+        crash.response_body["errors"][0]["data"]["status"] = 503
+        client = _token_only_client(
+            mock_transport, password="secret", password_kept=True
+        )
+        client.refresh_token = AsyncMock(side_effect=crash)
+
+        assert await _poll(client) is crash
+
+        client.login.assert_not_called()
+
     async def test_kept_password_login_failing_transiently_keeps_the_refusal_period(
         self, mock_transport, clock
     ):

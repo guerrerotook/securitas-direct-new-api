@@ -496,6 +496,26 @@ class TestDeadRefreshTokenSignal:
         err = self._refresh_error({"res": "ERROR", "err": "7", "status": 503})
         assert dead_refresh_token_signal(err) is None
 
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param({"data": {"status": 503}}, id="status-503"),
+            pytest.param({"name": "TimeoutError"}, id="timeout-name"),
+            pytest.param({"data": {"err": "TimeoutError"}}, id="timeout-code"),
+            pytest.param({"data": {"err": "60067"}}, id="err-60067"),
+        ],
+    )
+    def test_crash_that_also_says_server_fault_or_genuine_is_not_a_refusal(
+        self, extra
+    ):
+        """The crash message does not outrank what the rest of the error
+        says: a 5xx status or Verisure's timeout reply is a server fault, and
+        60067 is a genuine rejection."""
+        err = refresh_login_crash_error()
+        err.response_body["errors"][0].update(extra)
+        assert exceptions.is_refresh_login_crash(err)
+        assert dead_refresh_token_signal(err) is None
+
     def test_unknown_code_on_another_path_is_not_a_refusal(self):
         err = self._refresh_error(
             {"res": "ERROR", "err": "99", "status": 401}, path=["xSArmPanel"]
