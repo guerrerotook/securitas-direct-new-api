@@ -17,6 +17,7 @@ from custom_components.securitas.verisure_owa_api.client import (
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
+    APIConnectionError,
     AuthenticationError,
     SessionExpiredError,
     TwoFactorRequiredError,
@@ -1173,6 +1174,75 @@ class TestRefusalsKeepRetrying:
         assert await _race(client) == [None, None]
         assert client.refresh_token.await_count == 1
         assert client.refresh_refusals_persisting is False
+
+
+class TestKeptPassword:
+    """A password the user chose to keep is spent at the first refusal; one
+    held only in memory waits until refusals persist."""
+
+    @REFUSALS
+    async def test_kept_password_signs_in_at_the_first_refusal(
+        self, mock_transport, clock, make_refusal
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_refresh_refusal_alert=alerts,
+        )
+        client.refresh_token = AsyncMock(side_effect=make_refusal())
+
+        assert await _poll(client) is None
+
+        client.login.assert_awaited_once()
+        alerts.assert_not_called()
+
+    async def test_kept_password_login_failing_transiently_keeps_the_refusal_period(
+        self, mock_transport, clock
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_refresh_refusal_alert=alerts,
+        )
+        del client.login  # the real login, failing at the transport
+        operations: list[str] = []
+
+        async def execute(content, headers, **kwargs):
+            operations.append(content["operationName"])
+            if content["operationName"] == "RefreshLogin":
+                raise refresh_token_rejected_error()
+            assert content["operationName"] == "mkLoginToken"
+            raise APIConnectionError("connection reset")
+
+        mock_transport.execute.side_effect = execute
+
+        assert isinstance(await _poll(client), APIConnectionError)
+        assert operations == ["RefreshLogin", "mkLoginToken"]
+
+        clock.advance(minutes=1)
+        err = await _poll(client)
+        assert "still refusing" in str(err)
+        assert operations == ["RefreshLogin", "mkLoginToken"]
+
+        for _ in range(14):
+            clock.advance(minutes=1)
+            await _poll(client)
+        alerts.assert_called_once_with(True)
+
+    @REFUSALS
+    async def test_in_memory_password_waits_for_persisting_refusals(
+        self, mock_transport, clock, make_refusal
+    ):
+        client = _token_only_client(mock_transport, password="secret")
+        client.refresh_token = AsyncMock(side_effect=make_refusal())
+
+        assert isinstance(await _poll(client), VerisureOwaError)
+
+        client.login.assert_not_called()
 
 
 def _yielding(effect):

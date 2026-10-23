@@ -163,6 +163,7 @@ class _ClientBase:
         username: str,
         password: str,
         *,
+        password_kept: bool = False,
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
@@ -180,6 +181,9 @@ class _ClientBase:
         # Credentials & locale
         self.username = username
         self.password = password
+        # True only when the user chose to keep the password: it is then spent
+        # at the first refusal rather than once refusals persist.
+        self.password_kept = password_kept
         self.country = country.upper()
         self.language = language
 
@@ -587,8 +591,9 @@ class _ClientBase:
                     # password surfaces as a clean reauth signal. Anything else
                     # (5xx, a timeout, or Verisure refusing the token) may be a
                     # passing fault: don't spend a login; record it and
-                    # propagate so the coordinator retries. A stored password is
-                    # spent only once refusals persist.
+                    # propagate so the coordinator retries. A password held in
+                    # memory is spent only once refusals persist; a kept one at
+                    # the first refusal.
                     if is_genuine_auth_failure(owa_err):
                         _LOGGER.warning(
                             "Refresh token genuinely rejected, falling back to "
@@ -601,17 +606,24 @@ class _ClientBase:
                             self._note_refresh_refusal(signal)
                         if not (
                             signal is not None
-                            and self._refusals_persisting
                             and self.password
+                            and (self._refusals_persisting or self.password_kept)
                         ):
                             self.record_auth_recovery_failure(owa_err)
                             if isinstance(err, VerisureOwaError):
                                 raise
                             raise owa_err from err
-                        _LOGGER.warning(
-                            "Verisure keeps refusing the refresh token, "
-                            "falling back to login"
-                        )
+                        if self._refusals_persisting:
+                            _LOGGER.warning(
+                                "Verisure keeps refusing the refresh token, "
+                                "falling back to login"
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "Verisure refused the refresh token (%s); "
+                                "signing in with the kept password",
+                                signal,
+                            )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
             # pylint: disable=no-member  # provided by _AuthMixin
             await self.login()  # type: ignore[attr-defined]
@@ -622,7 +634,12 @@ class _ClientBase:
         Not recorded as a recovery failure: no attempt was made.
         """
         last = self._last_renewal_attempt
-        if not self._refusals_persisting or last is None:
+        # A kept password is spent at every unpaced refusal, so it is paced from
+        # the first one: otherwise every poll would sign in with it.
+        refusing = self._refusals_persisting or (
+            self.password_kept and self._refresh_refused_since is not None
+        )
+        if not refusing or last is None:
             return
         next_try = last + REFRESH_REFUSAL_RETRY_EVERY
         if datetime.now(UTC) < next_try:

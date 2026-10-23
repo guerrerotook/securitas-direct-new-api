@@ -423,6 +423,11 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub.config_entry = None
     hub.client = AsyncMock()
     hub.client.username = "test@example.com"
+    # An AsyncMock attribute reads as true; these must default to "no password".
+    hub.client.password = ""
+    hub.client.password_kept = False
+    # An instance attribute, so spec=VerisureHub omits it.
+    hub.last_login_refusal = None
     hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
     hub.lang = "es"

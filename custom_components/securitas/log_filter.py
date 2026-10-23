@@ -72,8 +72,14 @@ class SensitiveDataFilter(logging.Filter):
         masked = "***" if len(number) <= 4 else "***" + number[-4:]
         self._secrets[number] = masked
 
-    def update_secret(self, key: str, value: str | None) -> None:
-        """Register or update a sensitive value for redaction."""
+    def update_secret(
+        self, key: str, value: str | None, *, label: str | None = None
+    ) -> None:
+        """Register or update a sensitive value for redaction.
+
+        ``label`` replaces the label looked up from ``key``, for keys that carry
+        a per-account suffix the log must not show.
+        """
         # Remove old value for this key if it exists
         old = self._keys.pop(key, None)
         if old and old in self._secrets:
@@ -82,7 +88,8 @@ class SensitiveDataFilter(logging.Filter):
         if not value:
             return
 
-        label = _REDACTION_LABELS.get(key, f"[{key.upper()}]")
+        if label is None:
+            label = _REDACTION_LABELS.get(key, f"[{key.upper()}]")
         self._secrets[value] = label
         self._keys[key] = value
 

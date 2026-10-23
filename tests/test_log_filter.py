@@ -156,6 +156,26 @@ def test_update_secret_replaces_old_value():
     assert "new-token" not in record.msg
 
 
+def test_two_accounts_passwords_both_redacted():
+    """Per-account keys keep both passwords registered; the given label, not
+    the key, is what reaches the log."""
+    f = SensitiveDataFilter()
+    f.update_secret("password:aaaaaaaaaaaa", "first-secret", label="[PASSWORD]")
+    f.update_secret("password:bbbbbbbbbbbb", "second-secret", label="[PASSWORD]")
+
+    record = logging.LogRecord(
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
+        msg="first-secret and second-secret",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "[PASSWORD] and [PASSWORD]"
+
+
 def test_filter_always_returns_true():
     """Filter never suppresses log records."""
     f = SensitiveDataFilter()

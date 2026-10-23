@@ -27,12 +27,30 @@ from custom_components.securitas.verisure_owa_api import (
 from custom_components.securitas.verisure_owa_api.client._base import (
     _token_fingerprint,
 )
+from custom_components.securitas.verisure_owa_api.exceptions import (
+    dead_refresh_token_signal,
+)
 from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
 
-from .conftest import make_installation
+from .conftest import (
+    make_installation,
+    refresh_login_crash_error,
+    refresh_token_rejected_err7_error,
+    refresh_token_rejected_error,
+)
+
+_REFUSALS = pytest.mark.parametrize(
+    "make_refusal",
+    [
+        refresh_token_rejected_error,
+        refresh_token_rejected_err7_error,
+        refresh_login_crash_error,
+    ],
+    ids=["err4", "err7", "crash"],
+)
 
 _HUB_LOGGER = "custom_components.securitas.hub"
 
@@ -79,6 +97,15 @@ class TestConstruction:
             mock_client=False, **{CONF_REFRESH_TOKEN: "persisted-refresh-token"}
         )
         assert hub.client.refresh_token_value == "persisted-refresh-token"
+
+    @pytest.mark.parametrize("kept", [True, False])
+    def test_keep_password_flag_reaches_the_client(self, kept):
+        hub = make_hub(mock_client=False, **{CONF_KEEP_PASSWORD: kept})
+        assert hub.client.password_kept is kept
+
+    def test_client_password_not_kept_without_the_flag(self):
+        hub = make_hub(mock_client=False)
+        assert hub.client.password_kept is False
 
     def test_get_refresh_token_returns_clients_refresh_token_value(self):
         """The hub-level getter mirrors get_authentication_token."""
@@ -660,6 +687,57 @@ class TestLogin:
         await hub.login()
 
         hub.client.login.assert_awaited_once()
+
+    @_REFUSALS
+    async def test_setup_refusal_with_kept_password_signs_in_with_password(
+        self, make_refusal
+    ):
+        """A refusal at setup is followed by a password sign-in in the same
+        attempt when the user kept the password, and is remembered so setup
+        still counts it if that sign-in fails."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        refusal = make_refusal()
+        hub.client.refresh_token = AsyncMock(side_effect=refusal)
+        hub.client.login = AsyncMock()
+
+        await hub.login()
+
+        hub.client.login.assert_awaited_once()
+        assert hub.last_login_refusal == dead_refresh_token_signal(refusal)
+        assert hub.last_login_refusal is not None
+
+    @_REFUSALS
+    async def test_setup_refusal_without_kept_password_raises(self, make_refusal):
+        """A password held only in memory is not spent on a setup refusal."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = False
+        refusal = make_refusal()
+        hub.client.refresh_token = AsyncMock(side_effect=refusal)
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError) as raised:
+            await hub.login()
+
+        assert raised.value is refusal
+        hub.client.login.assert_not_awaited()
+        assert hub.last_login_refusal is None
+
+    async def test_last_login_refusal_resets_on_each_login(self):
+        hub = make_hub()
+        hub.client.refresh_token_value = "refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        hub.last_login_refusal = "err 4"
+        hub.client.refresh_token = AsyncMock(return_value=True)
+
+        await hub.login()
+
+        assert hub.last_login_refusal is None
 
 
 # ── arm_alarm / disarm_alarm tests ──────────────────────────────────────────

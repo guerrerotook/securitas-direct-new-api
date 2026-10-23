@@ -789,7 +789,12 @@ async def _login_or_raise(
             "Unable to connect to Verisure: %s",
             err.log_detail(),
         )
-        if dead_refresh_token_signal(err) is not None:
+        # A refusal answered by a kept-password sign-in that then failed is
+        # still a refusal.
+        if (
+            dead_refresh_token_signal(err) is not None
+            or client.last_login_refusal is not None
+        ):
             _note_setup_refresh_refusal(hass, username)
         _note_setup_unreachable(hass, username)
         raise ConfigEntryNotReady(
@@ -1684,7 +1689,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     log_filter.update_secret("username", config[CONF_USERNAME])
     if config.get(CONF_PASSWORD):
-        log_filter.update_secret("password", config[CONF_PASSWORD])
+        # One key per account: a shared key would unregister the previous
+        # account's password.
+        log_filter.update_secret(
+            f"password:{_hashed_issue_id('', config[CONF_USERNAME])}",
+            config[CONF_PASSWORD],
+            label="[PASSWORD]",
+        )
 
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:

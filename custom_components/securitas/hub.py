@@ -55,7 +55,11 @@ from .verisure_owa_api.client._base import (
     RefreshTokenSnapshot,
     _token_fingerprint,
 )
-from .verisure_owa_api.exceptions import is_account_blocked, is_genuine_auth_failure
+from .verisure_owa_api.exceptions import (
+    dead_refresh_token_signal,
+    is_account_blocked,
+    is_genuine_auth_failure,
+)
 from .verisure_owa_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
@@ -260,6 +264,7 @@ class VerisureHub:
             language=self.lang,
             username=domain_config[CONF_USERNAME],
             password=domain_config.get(CONF_PASSWORD, ""),
+            password_kept=bool(domain_config.get(CONF_KEEP_PASSWORD)),
             device_id=domain_config[CONF_DEVICE_ID],
             uuid=domain_config[CONF_UNIQUE_ID],
             id_device_indigitall=domain_config[CONF_DEVICE_INDIGITALL],
@@ -283,6 +288,9 @@ class VerisureHub:
         # Coalesce concurrent full-image fetches for the same id_signal — two
         # dashboard cards on the same camera share one API call.
         self._full_image_inflight: dict[str, asyncio.Future[bytes | None]] = {}
+        # The refusal the last login() answered with a kept-password sign-in,
+        # so setup still counts it when that sign-in fails.
+        self.last_login_refusal: str | None = None
 
     async def login(self) -> None:
         """Authenticate, preferring a stored refresh token over a password login.
@@ -306,6 +314,7 @@ class VerisureHub:
         full password login — the same "don't spend a login on a passing backend
         wobble" trade-off the steady-state client path (_base.py) makes.
         """
+        self.last_login_refusal = None
         if self.client.refresh_token_value:
             rejection: VerisureOwaError | None = None
             try:
@@ -313,7 +322,21 @@ class VerisureHub:
                     return
             except VerisureOwaError as err:
                 if not is_genuine_auth_failure(err):
-                    raise
+                    signal = dead_refresh_token_signal(err)
+                    if not (
+                        signal is not None
+                        and self.client.password_kept
+                        and self.client.password
+                    ):
+                        raise
+                    self.last_login_refusal = signal
+                    _LOGGER.info(
+                        "Verisure refused the saved sign-in (%s); signing in "
+                        "with the kept password",
+                        signal,
+                    )
+                    await self.client.login()
+                    return
                 _LOGGER.warning("Refresh genuinely rejected: %s", err.log_detail())
                 rejection = err
             if not self.client.password:

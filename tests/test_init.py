@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import hashlib
+import logging
 import os
 import time
 from collections import Counter, OrderedDict
@@ -71,7 +72,7 @@ from custom_components.securitas import (
     async_unload_entry,
     async_update_options,
 )
-from custom_components.securitas.const import API_CACHE_TTL
+from custom_components.securitas.const import API_CACHE_TTL, CONF_KEEP_PASSWORD
 from custom_components.securitas.hub import (
     _async_notify,
     _notify,
@@ -469,6 +470,36 @@ class TestAsyncSetupEntry:
         assert entry.entry_id in hass.data[DOMAIN]
         assert "hub" in hass.data[DOMAIN][entry.entry_id]
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
+
+    async def test_setup_registers_each_accounts_kept_password(self, hass, mock_hub):
+        """Two accounts' kept passwords stay redacted side by side."""
+        mock_hub.login = AsyncMock(side_effect=VerisureOwaError("connection failed"))
+        for username, password in (
+            ("first@example.com", "first-secret"),
+            ("second@example.com", "second-secret"),
+        ):
+            data = make_config_entry_data(username=username, password=password)
+            data[CONF_KEEP_PASSWORD] = True
+            entry = MockConfigEntry(domain=DOMAIN, data=data)
+            entry.add_to_hass(hass)
+            with (
+                _patch_hub(mock_hub),
+                patch("custom_components.securitas.async_get_clientsession"),
+                pytest.raises(ConfigEntryNotReady),
+            ):
+                await async_setup_entry(hass, entry)
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.DEBUG,
+            pathname="",
+            lineno=0,
+            msg="first-secret and second-secret",
+            args=(),
+            exc_info=None,
+        )
+        hass.data[DOMAIN]["log_filter"].filter(record)
+        assert record.msg == "[PASSWORD] and [PASSWORD]"
 
     async def test_setup_succeeds_with_refresh_token_only_entry(self, hass, mock_hub):
         """Refresh-token-shape entries (no CONF_PASSWORD) must set up cleanly."""
@@ -1126,6 +1157,18 @@ class TestBuildConfigDict:
         assert config[CONF_PASSWORD] == data[CONF_PASSWORD]
         assert config[CONF_COUNTRY] == data.get(CONF_COUNTRY)
         assert need_sign_in is False
+
+    @pytest.mark.parametrize("kept", [True, False])
+    def test_keep_password_flag_passes_through(self, kept):
+        data = make_config_entry_data()
+        data[CONF_KEEP_PASSWORD] = kept
+        config, _ = _build_config_dict(MockConfigEntry(domain=DOMAIN, data=data))
+        assert config[CONF_KEEP_PASSWORD] is kept
+
+    def test_keep_password_flag_defaults_to_false(self):
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        config, _ = _build_config_dict(entry)
+        assert config[CONF_KEEP_PASSWORD] is False
 
     def test_need_sign_in_when_device_id_missing(self):
         """Should set need_sign_in=True when CONF_DEVICE_ID is missing."""
@@ -3767,6 +3810,30 @@ class TestSetupRefreshRefusals:
 
         assert mock_hub.login.await_count == 8
         assert _sign_in_issues(hass) == {}
+
+    async def test_setup_kept_password_login_failing_still_counts_the_refusal(
+        self, hass, mock_hub, clock
+    ):
+        """A refusal answered by a kept-password sign-in that then fails
+        transiently is still a refusal: the notice appears 15 minutes in."""
+
+        async def refused_then_login_fails():
+            mock_hub.last_login_refusal = "err 4"
+            raise APIConnectionError("connection reset")
+
+        mock_hub.login = AsyncMock(side_effect=refused_then_login_fails)
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        for _ in range(2):  # t=0, t=10
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+            clock.advance(minutes=10)
+        assert _renewal_refused_issues(hass) == {}
+
+        with pytest.raises(ConfigEntryNotReady):  # t=20
+            await self._attempt(hass, entry, mock_hub)
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
 
     @_REFUSALS
     async def test_the_notice_appears_at_the_first_refusal_15_minutes_in(
