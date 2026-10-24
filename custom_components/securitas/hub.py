@@ -26,10 +26,12 @@ from .const import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
+    CONF_KEEP_PASSWORD,
     CONF_OPERATION_POLL_TIMEOUT,
     CONF_REFRESH_TOKEN,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DOMAIN,
+    PROJECT_URL,
     SIGNAL_CAMERA_STATE,
 )
 from .log_filter import SensitiveDataFilter
@@ -53,13 +55,18 @@ from .verisure_owa_api.client._base import (
     RefreshTokenSnapshot,
     _token_fingerprint,
 )
-from .verisure_owa_api.exceptions import is_account_blocked, is_genuine_auth_failure
+from .verisure_owa_api.exceptions import (
+    dead_refresh_token_signal,
+    is_account_blocked,
+    is_genuine_auth_failure,
+)
 from .verisure_owa_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
 
 _SIGN_IN_ISSUE = "sign_in_again_"
 _RENEWAL_REFUSED_ISSUE = "renewal_refused_"
+_UNREACHABLE_ISSUE = "cannot_reach_verisure_"
 
 
 def _hashed_issue_id(prefix: str, key: str) -> str:
@@ -73,6 +80,16 @@ def _sign_in_issue_id(username: str) -> str:
 
 def _renewal_refused_issue_id(username: str) -> str:
     return _hashed_issue_id(_RENEWAL_REFUSED_ISSUE, username)
+
+
+def _unreachable_issue_id(username: str) -> str:
+    return _hashed_issue_id(_UNREACHABLE_ISSUE, username)
+
+
+def setup_passwords(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """The kept passwords open setup dialogs have proven but not yet stored,
+    by flow id; each is the dialog's own config, which its new entry copies."""
+    return hass.data.get(DOMAIN, {}).get("setup_passwords", {})
 
 
 @callback
@@ -92,12 +109,48 @@ def raise_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
         translation_key="renewal_refused",
         translation_placeholders={"username": username},
     )
+    clear_unreachable_issue(hass, username)
 
 
 @callback
 def clear_renewal_refused_issue(hass: HomeAssistant, username: str) -> None:
     """Clear the account's renewal-refused issue, if raised."""
     ir.async_delete_issue(hass, DOMAIN, _renewal_refused_issue_id(username))
+
+
+@callback
+def raise_unreachable_issue(hass: HomeAssistant, username: str) -> None:
+    """Tell the user in Repairs that no request to Verisure has worked for an
+    hour.
+
+    One problem, one notice: not raised while the account's renewal-refused
+    or sign-in issue shows, since those failures also count here. Not
+    persistent, as the ``username`` placeholder is the email.
+    """
+    registry = ir.async_get(hass)
+    if registry.async_get_issue(
+        DOMAIN, _renewal_refused_issue_id(username)
+    ) or registry.async_get_issue(DOMAIN, _sign_in_issue_id(username)):
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _unreachable_issue_id(username),
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="cannot_reach_verisure",
+        translation_placeholders={
+            "username": username,
+            "url": f"{PROJECT_URL}/issues",
+        },
+    )
+
+
+@callback
+def clear_unreachable_issue(hass: HomeAssistant, username: str) -> None:
+    """Clear the account's "can't reach Verisure" issue, if raised."""
+    ir.async_delete_issue(hass, DOMAIN, _unreachable_issue_id(username))
 
 
 async def _async_notify(
@@ -196,6 +249,8 @@ class VerisureHub:
         """Initialize the Verisure OWA hub."""
         self.config = domain_config
         self.config_entry: ConfigEntry | None = config_entry
+        # Set once a newer sign-in replaces this hub as the account's session.
+        self.replaced = False
         self.country: str = domain_config[CONF_COUNTRY].upper()
         api_domains = ApiDomains()
         self.lang: str = api_domains.get_language(self.country)
@@ -220,6 +275,11 @@ class VerisureHub:
             language=self.lang,
             username=domain_config[CONF_USERNAME],
             password=domain_config.get(CONF_PASSWORD, ""),
+            # The box stays ticked after a rejected kept password is removed.
+            password_kept=bool(
+                domain_config.get(CONF_KEEP_PASSWORD)
+                and domain_config.get(CONF_PASSWORD)
+            ),
             device_id=domain_config[CONF_DEVICE_ID],
             uuid=domain_config[CONF_UNIQUE_ID],
             id_device_indigitall=domain_config[CONF_DEVICE_INDIGITALL],
@@ -231,6 +291,8 @@ class VerisureHub:
             refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
             on_refresh_token_changed=self._persist_refresh_token,
             on_refresh_refusal_alert=self._refresh_refusal_alert,
+            on_unreachable_alert=self._unreachable_alert,
+            on_kept_password_rejected=self._forget_kept_password,
         )
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
@@ -242,6 +304,9 @@ class VerisureHub:
         # Coalesce concurrent full-image fetches for the same id_signal — two
         # dashboard cards on the same camera share one API call.
         self._full_image_inflight: dict[str, asyncio.Future[bytes | None]] = {}
+        # The refusal the last login() answered with a kept-password sign-in,
+        # so setup still counts it when that sign-in fails.
+        self.last_login_refusal: str | None = None
 
     async def login(self) -> None:
         """Authenticate, preferring a stored refresh token over a password login.
@@ -251,20 +316,23 @@ class VerisureHub:
         ConfigEntryAuthFailed — sending an empty password to the API would just
         waste a round trip.
 
-        A transient failure (network, 5xx, 409, WAF block, an
-        xSRefreshLogin server crash or err 4 rejection) does not take that path:
-        it propagates so setup maps it to ConfigEntryNotReady and retries,
-        instead of forcing a needless reauth on a token-only account. This
-        mirrors the transient-vs-genuine split the client and coordinators
+        A transient failure (network, 5xx, 409, WAF block, an xSRefreshLogin
+        server crash or any other refusal of the saved sign-in) does not take
+        that path: it propagates so setup maps it to ConfigEntryNotReady and
+        retries, instead of forcing a needless reauth on a token-only account.
+        This mirrors the transient-vs-genuine split the client and coordinators
         already use via is_genuine_auth_failure(). Verisure refusing the token
         is retried this way however long it lasts; setup tracks how long (see
         _note_setup_refresh_refusal in __init__).
 
-        For an account that still has a stored password, this deliberately means
-        a transient refresh failure retries rather than immediately burning a
-        full password login — the same "don't spend a login on a passing backend
-        wobble" trade-off the steady-state client path (_base.py) makes.
+        The exception is a password the user chose to keep: a refusal is then
+        followed at once by a sign-in with it, and a password Verisure rejects
+        is dropped from the client so it is not tried again. A password held
+        only in memory is not spent on a refusal at setup: the same "don't
+        spend a login on a passing backend wobble" trade-off the steady-state
+        client path (_base.py) makes until refusals persist.
         """
+        self.last_login_refusal = None
         if self.client.refresh_token_value:
             rejection: VerisureOwaError | None = None
             try:
@@ -272,7 +340,21 @@ class VerisureHub:
                     return
             except VerisureOwaError as err:
                 if not is_genuine_auth_failure(err):
-                    raise
+                    signal = dead_refresh_token_signal(err)
+                    if not (
+                        signal is not None
+                        and self.client.password_kept
+                        and self.client.password
+                    ):
+                        raise
+                    self.last_login_refusal = signal
+                    _LOGGER.info(
+                        "Verisure refused the saved sign-in (%s); signing in "
+                        "with the kept password",
+                        signal,
+                    )
+                    await self._login_unattended()
+                    return
                 _LOGGER.warning("Refresh genuinely rejected: %s", err.log_detail())
                 rejection = err
             if not self.client.password:
@@ -284,7 +366,23 @@ class VerisureHub:
                     "Refresh token rejected and no password available; reauth required"
                 )
             _LOGGER.info("Falling back to password login after refresh failure")
+            await self._login_unattended()
+            return
         await self.client.login()
+
+    async def _login_unattended(self) -> None:
+        """Sign in with the client's stored password in place of the saved
+        sign-in, dropping the password if Verisure rejects it.
+
+        Not used for a sign-in with no saved sign-in yet: the setup dialog
+        answers an SMS code request by signing in with the same password.
+        """
+        submitted, kept = self.client.password, self.client.password_kept
+        try:
+            await self.client.login()
+        except VerisureOwaError as err:
+            self.client.forget_rejected_password(err, submitted, kept=kept)
+            raise
 
     async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
         """Validate the current device."""
@@ -599,6 +697,11 @@ class VerisureHub:
         return self.client.refresh_refusal_alert_raised
 
     @property
+    def unreachable_alert_raised(self) -> bool:
+        """True from the client's unreachable alert until a request succeeds."""
+        return self.client.unreachable_alert_raised
+
+    @property
     def renewal_lock(self) -> asyncio.Lock:
         """The lock the client's token renewals hold; see the client's."""
         return self.client.renewal_lock
@@ -615,7 +718,8 @@ class VerisureHub:
     def _persist_refresh_token(self, value: str) -> None:
         """Write a rotated refresh token back to the config entry.
 
-        Also scrubs any legacy CONF_PASSWORD on the first capture. No-op when
+        Also scrubs a CONF_PASSWORD the entry does not keep (a legacy one, or
+        one beside an unticked box) on the first capture. No-op when
         the hub is detached from a config entry (config-flow construction).
 
         Never writes into an entry that reauth or Reconfigure has moved to
@@ -635,14 +739,15 @@ class VerisureHub:
             outcome = "other-account"
         else:
             existing = self.config_entry.data
-            if (
-                existing.get(CONF_REFRESH_TOKEN) == value
-                and CONF_PASSWORD not in existing
+            keeps_password = bool(existing.get(CONF_KEEP_PASSWORD))
+            if existing.get(CONF_REFRESH_TOKEN) == value and (
+                keeps_password or CONF_PASSWORD not in existing
             ):
                 outcome = "already-current"
             else:
                 new_data = {**existing, CONF_REFRESH_TOKEN: value}
-                new_data.pop(CONF_PASSWORD, None)
+                if not keeps_password:
+                    new_data.pop(CONF_PASSWORD, None)
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, data=new_data
                 )
@@ -670,6 +775,57 @@ class VerisureHub:
         if entry is None or entry.data.get(CONF_USERNAME) != self.client.username:
             return
         raise_renewal_refused_issue(self.hass, self.client.username)
+
+    def _unreachable_alert(self, active: bool) -> None:
+        """Raise or clear the "can't reach Verisure" issue for the client's
+        account, by the same entry rules as the renewal-refused issue."""
+        if active:
+            self.raise_unreachable_notice()
+        elif self.config_entry is not None:
+            clear_unreachable_issue(self.hass, self.client.username)
+
+    def _forget_kept_password(self, rejected: str) -> None:
+        """Remove the password Verisure rejected from the entries of the
+        client's account that store it, and from open setup dialogs about to
+        store it, so no restart or joining entry tries it again. A different
+        password, saved since, stays.
+
+        The box stays ticked: the sign-in the user is asked for next keeps the
+        new password.
+
+        A replaced hub leaves them alone: the newer sign-in may have saved the
+        same password, and Verisure's answer to this one does not judge it.
+        """
+        if self.replaced:
+            return
+        username = self.client.username
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if (
+                entry.data.get(CONF_USERNAME) != username
+                or entry.data.get(CONF_PASSWORD) != rejected
+            ):
+                continue
+            new_data = {**entry.data}
+            new_data.pop(CONF_PASSWORD)
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+        for config in setup_passwords(self.hass).values():
+            if (
+                config[CONF_USERNAME] == username
+                and config.get(CONF_PASSWORD) == rejected
+            ):
+                del config[CONF_PASSWORD]
+        _LOGGER.warning(
+            "Verisure rejected the kept password; it is no longer stored. Sign "
+            "in again to keep a new one"
+        )
+
+    def raise_unreachable_notice(self) -> None:
+        """Raise the "can't reach Verisure" issue, unless no entry uses the
+        account: the hub is detached, or Reconfigure moved its entry."""
+        entry = self.config_entry
+        if entry is None or entry.data.get(CONF_USERNAME) != self.client.username:
+            return
+        raise_unreachable_issue(self.hass, self.client.username)
 
     def persist_current_refresh_token(self) -> None:
         """Write the current in-memory refresh token to the config entry now.

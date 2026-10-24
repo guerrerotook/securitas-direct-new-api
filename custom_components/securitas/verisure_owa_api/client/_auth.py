@@ -11,6 +11,7 @@ from ..exceptions import (
     AuthenticationError,
     TwoFactorRequiredError,
     VerisureOwaError,
+    is_server_fault_reply,
 )
 from ..graphql_queries import (
     LOGIN_TOKEN_MUTATION,
@@ -30,11 +31,12 @@ class _AuthMixin(_ClientBase):
     async def login(self) -> None:
         """Login to the Verisure OWA API and set auth tokens.
 
-        Once a refresh token has been minted the password is scrubbed from
-        storage (v5.1.0). Sending an empty password to the API only earns a
-        credential error and burns an attempt toward Verisure's 3-strikes
-        account lock, so refuse it here and signal reauth instead — this guards
-        every fallback path that reaches login() after a rejected refresh (#499).
+        Once a refresh token has been minted, a password the user did not
+        choose to keep is scrubbed from storage. Sending an empty password to
+        the API only earns a credential error and burns an attempt toward
+        Verisure's 3-strikes account lock, so refuse it here and signal reauth
+        instead — this guards every fallback path that reaches login() after a
+        rejected refresh (#499).
         """
         if not self.password:
             raise AuthenticationError(
@@ -74,6 +76,9 @@ class _AuthMixin(_ClientBase):
                     _new = AccountBlockedError(err.message, http_status=err.http_status)
                     _new.response_body = result_json
                     raise _new from err
+                # A passing fault says nothing about the password.
+                if is_server_fault_reply(result_json):
+                    raise
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken") and data["xSLoginToken"].get(
@@ -94,7 +99,12 @@ class _AuthMixin(_ClientBase):
 
         if "errors" in response:
             _LOGGER.error("Login error %s", response["errors"][0]["message"])
-            _new_err = AuthenticationError(response["errors"][0]["message"])
+            message = response["errors"][0]["message"]
+            _new_err = (
+                VerisureOwaError(message)
+                if is_server_fault_reply(response)
+                else AuthenticationError(message)
+            )
             _new_err.response_body = response
             raise _new_err
 

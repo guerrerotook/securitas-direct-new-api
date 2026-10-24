@@ -45,6 +45,7 @@ from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    AuthenticationError,
     VerisureOwaError,
 )
 from custom_components.securitas.verisure_owa_api.http_transport import (
@@ -188,6 +189,117 @@ def refresh_token_rejected_error() -> VerisureOwaError:
     """Build the xSRefreshLogin ``err 4`` rejection as refresh_token() raises it."""
     body = refresh_token_rejected_response()
     err = VerisureOwaError(body["errors"][0]["message"], http_status=404)
+    err.response_body = body
+    return err
+
+
+def refresh_token_rejected_err7_response() -> dict:
+    """Build the xSRefreshLogin ``err 7`` / 401 refusal, as returned (#652).
+
+    Verisure answered every renewal this way for seven hours while its own
+    apps worked; signing in again ended it.
+    """
+    message = "Il y a eu une erreur. Veuillez réessayer ultérieurement. "
+    return {
+        "errors": [
+            {
+                "message": message,
+                "name": "ApiError",
+                "data": {"res": "ERROR", "err": "7", "status": 401},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+
+
+def refresh_token_rejected_err99_response() -> dict:
+    """Build an xSRefreshLogin refusal with a code never seen (err 99 / 401).
+
+    Stands in for any error code Verisure may answer the renewal with: every
+    one counts as a refusal of the saved sign-in, not only err 4 and err 7.
+    """
+    return {
+        "errors": [
+            {
+                "message": "Si è verificato un errore inaspettato",
+                "name": "ApiError",
+                "data": {"res": "ERROR", "err": "99", "status": 401},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+
+
+def login_error_reply(error: dict) -> dict:
+    """An ``mkLoginToken`` reply carrying ``error`` and no sign-in."""
+    return {
+        "errors": [{**error, "path": ["xSLoginToken"]}],
+        "data": {"xSLoginToken": None},
+    }
+
+
+LOGIN_WRONG_PASSWORD = {
+    "message": "Invalid user or password",
+    "data": {"res": "ERROR", "err": "60022", "status": 401},
+}
+# Verisure answering a sign-in without judging the password.
+LOGIN_SERVER_FAULTS = {
+    "timeout": {
+        "message": "operation timed out",
+        "name": "TimeoutError",
+        "data": {"err": "TimeoutError"},
+    },
+    "server-error": {
+        "message": "Internal server error",
+        "data": {"res": "ERROR", "err": "500", "status": 500},
+    },
+    "crash": {"message": "Cannot read properties of undefined (reading 'fr')"},
+}
+
+
+def login_rejected_error() -> AuthenticationError:
+    """A wrong password, as login() raises it from Verisure's reply."""
+    body = login_error_reply(LOGIN_WRONG_PASSWORD)
+    err = AuthenticationError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
+
+
+def refresh_token_rejected_err7_error() -> VerisureOwaError:
+    """Build the xSRefreshLogin ``err 7`` refusal as refresh_token() raises it."""
+    body = refresh_token_rejected_err7_response()
+    err = VerisureOwaError(body["errors"][0]["message"], http_status=401)
+    err.response_body = body
+    return err
+
+
+def refresh_token_rejected_err99_error() -> VerisureOwaError:
+    """Build the err 99 refusal as refresh_token() raises it."""
+    body = refresh_token_rejected_err99_response()
+    err = VerisureOwaError(body["errors"][0]["message"], http_status=401)
+    err.response_body = body
+    return err
+
+
+def refresh_timeout_reply_error() -> VerisureOwaError:
+    """Build Verisure's own timeout reply to xSRefreshLogin (#652).
+
+    Verisure answered, but only to say its backend timed out: not a refusal.
+    """
+    body = {
+        "errors": [
+            {
+                "message": "operation timed out",
+                "name": "TimeoutError",
+                "data": {"err": "TimeoutError"},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+    err = VerisureOwaError(body["errors"][0]["message"])
     err.response_body = body
     return err
 
@@ -374,6 +486,11 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub.config_entry = None
     hub.client = AsyncMock()
     hub.client.username = "test@example.com"
+    # An AsyncMock attribute reads as true; these must default to "no password".
+    hub.client.password = ""
+    hub.client.password_kept = False
+    # An instance attribute, so spec=VerisureHub omits it.
+    hub.last_login_refusal = None
     hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
     hub.lang = "es"
@@ -392,6 +509,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     # A spec'd property reads as a truthy MagicMock; a live token is the norm.
     hub.refresh_refusals_persisting = False
     hub.refresh_refusal_alert_raised = False
+    hub.unreachable_alert_raised = False
     for key, val in overrides.items():
         setattr(hub, key, val)
     return hub

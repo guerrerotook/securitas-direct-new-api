@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import hashlib
+import logging
 import os
 import time
 from collections import Counter, OrderedDict
@@ -10,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_PASSWORD,
@@ -59,10 +61,13 @@ from custom_components.securitas import (
     _build_config_dict,
     _cached_installations,
     _get_or_create_session,
+    _login_or_raise,
     _new_session_record,
     _options_are_authoritative,
     _raise_sign_in_issue,
+    _replace_account_session,
     _store_installations_cache,
+    _sync_kept_password,
     _synced_entry_data,
     add_device_information,
     async_migrate_entry,
@@ -71,12 +76,15 @@ from custom_components.securitas import (
     async_unload_entry,
     async_update_options,
 )
-from custom_components.securitas.const import API_CACHE_TTL
+from custom_components.securitas.const import API_CACHE_TTL, CONF_KEEP_PASSWORD
 from custom_components.securitas.hub import (
     _async_notify,
+    _hashed_issue_id,
     _notify,
     raise_renewal_refused_issue,
+    raise_unreachable_issue,
 )
+from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
 from custom_components.securitas.verisure_owa_api.client import _base as client_base
 from custom_components.securitas.verisure_owa_api.const import (
@@ -91,11 +99,17 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
 from tests.conftest import (
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
+    login_rejected_error,
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
     refresh_login_crash_error,
     refresh_response,
+    refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
     refresh_token_rejected_error,
 )
 from tests.test_hub import make_hub
@@ -467,6 +481,36 @@ class TestAsyncSetupEntry:
         assert entry.entry_id in hass.data[DOMAIN]
         assert "hub" in hass.data[DOMAIN][entry.entry_id]
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
+
+    async def test_setup_registers_each_accounts_kept_password(self, hass, mock_hub):
+        """Two accounts' kept passwords stay redacted side by side."""
+        mock_hub.login = AsyncMock(side_effect=VerisureOwaError("connection failed"))
+        for username, password in (
+            ("first@example.com", "first-secret"),
+            ("second@example.com", "second-secret"),
+        ):
+            data = make_config_entry_data(username=username, password=password)
+            data[CONF_KEEP_PASSWORD] = True
+            entry = MockConfigEntry(domain=DOMAIN, data=data)
+            entry.add_to_hass(hass)
+            with (
+                _patch_hub(mock_hub),
+                patch("custom_components.securitas.async_get_clientsession"),
+                pytest.raises(ConfigEntryNotReady),
+            ):
+                await async_setup_entry(hass, entry)
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.DEBUG,
+            pathname="",
+            lineno=0,
+            msg="first-secret and second-secret",
+            args=(),
+            exc_info=None,
+        )
+        hass.data[DOMAIN]["log_filter"].filter(record)
+        assert record.msg == "[PASSWORD] and [PASSWORD]"
 
     async def test_setup_succeeds_with_refresh_token_only_entry(self, hass, mock_hub):
         """Refresh-token-shape entries (no CONF_PASSWORD) must set up cleanly."""
@@ -1124,6 +1168,18 @@ class TestBuildConfigDict:
         assert config[CONF_PASSWORD] == data[CONF_PASSWORD]
         assert config[CONF_COUNTRY] == data.get(CONF_COUNTRY)
         assert need_sign_in is False
+
+    @pytest.mark.parametrize("kept", [True, False])
+    def test_keep_password_flag_passes_through(self, kept):
+        data = make_config_entry_data()
+        data[CONF_KEEP_PASSWORD] = kept
+        config, _ = _build_config_dict(MockConfigEntry(domain=DOMAIN, data=data))
+        assert config[CONF_KEEP_PASSWORD] is kept
+
+    def test_keep_password_flag_defaults_to_false(self):
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        config, _ = _build_config_dict(entry)
+        assert config[CONF_KEEP_PASSWORD] is False
 
     def test_need_sign_in_when_device_id_missing(self):
         """Should set need_sign_in=True when CONF_DEVICE_ID is missing."""
@@ -2750,6 +2806,30 @@ class TestSignInIssue:
         assert issue.translation_placeholders == {"username": "test@example.com"}
         assert "@" not in _SIGN_IN_ISSUE_ID
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            TwoFactorRequiredError("2FA required"),
+            AuthenticationError("bad credentials"),
+            AccountBlockedError("blocked"),
+        ],
+        ids=["code-needed", "login-rejected", "blocked"],
+    )
+    async def test_a_sign_in_repair_replaces_the_unreachable_notice(
+        self, hass, mock_hub, error
+    ):
+        """One problem, one notice: the sign-in issue removes the account's
+        "can't reach Verisure" notice."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_unreachable_issue(hass, "test@example.com")
+        assert list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]
+
+        await self._fail(hass, entry, mock_hub, error)
+
+        assert list(_sign_in_issues(hass)) == [_SIGN_IN_ISSUE_ID]
+        assert _unreachable_issues(hass) == {}
+
     async def test_a_blocked_account_raises_a_repair_saying_how_to_unblock_it(
         self, hass, mock_hub
     ):
@@ -3709,17 +3789,22 @@ def _keep_another_account_loaded(hass, username="other@example.com") -> None:
 
 _REFUSALS = pytest.mark.parametrize(
     "make_refusal",
-    [refresh_token_rejected_error, refresh_login_crash_error],
-    ids=["err4", "crash"],
+    [
+        refresh_token_rejected_error,
+        refresh_token_rejected_err7_error,
+        refresh_token_rejected_err99_error,
+        refresh_login_crash_error,
+    ],
+    ids=["err4", "err7", "err99", "crash"],
 )
 
 _ALERT_LOG = "Verisure has refused to renew the saved sign-in"
 
 
 class TestSetupRefreshRefusals:
-    """Verisure refusing the stored token at setup (err 4, or the #568
-    refresh-login crash) is retried for as long as it lasts, never turned into
-    a reauth prompt.
+    """Verisure refusing the stored token at setup (any error Verisure answers
+    on xSRefreshLogin, such as err 4, err 7 or the #568 crash) is retried for
+    as long as it lasts, never turned into a reauth prompt.
 
     Once refusals have lasted 15 minutes a Repairs notice says how to sign in
     again. The tracking is per account and lives in hass.data, because each
@@ -3761,6 +3846,30 @@ class TestSetupRefreshRefusals:
 
         assert mock_hub.login.await_count == 8
         assert _sign_in_issues(hass) == {}
+
+    async def test_setup_kept_password_login_failing_still_counts_the_refusal(
+        self, hass, mock_hub, clock
+    ):
+        """A refusal answered by a kept-password sign-in that then fails
+        transiently is still a refusal: the notice appears 15 minutes in."""
+
+        async def refused_then_login_fails():
+            mock_hub.last_login_refusal = "err 4"
+            raise APIConnectionError("connection reset")
+
+        mock_hub.login = AsyncMock(side_effect=refused_then_login_fails)
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        for _ in range(2):  # t=0, t=10
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+            clock.advance(minutes=10)
+        assert _renewal_refused_issues(hass) == {}
+
+        with pytest.raises(ConfigEntryNotReady):  # t=20
+            await self._attempt(hass, entry, mock_hub)
+        assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
 
     @_REFUSALS
     async def test_the_notice_appears_at_the_first_refusal_15_minutes_in(
@@ -4053,6 +4162,166 @@ class TestSetupRefreshRefusals:
         refusals = hass.data[DOMAIN]["refresh_refusals"]
         assert ("test@example.com" in refusals) is kept
         assert "other@example.com" in refusals
+
+
+def _unreachable_issues(hass):
+    return {
+        issue_id: issue
+        for (domain, issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue_id.startswith("cannot_reach_verisure_")
+    }
+
+
+_UNREACHABLE_ISSUE_ID = (
+    "cannot_reach_verisure_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+)
+
+
+class TestSetupUnreachable:
+    """Setup that cannot reach Verisure for an hour raises the "can't reach
+    Verisure" notice. Each retry builds a fresh hub, so setup tracks the
+    period per account in hass.data, as it does refusals."""
+
+    @pytest.fixture
+    def mock_hub(self):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    _attempt = TestSetupRefreshRefusals._attempt
+
+    async def test_setup_unreachable_for_an_hour_raises_the_notice(
+        self, hass, mock_hub, clock
+    ):
+        mock_hub.login = AsyncMock(side_effect=APIConnectionError("timeout"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        clock.advance(minutes=59)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        assert _unreachable_issues(hass) == {}
+
+        clock.advance(minutes=1)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+        issues = _unreachable_issues(hass)
+        assert list(issues) == [_UNREACHABLE_ISSUE_ID]
+        assert issues[_UNREACHABLE_ISSUE_ID].translation_placeholders == {
+            "username": "test@example.com",
+            "url": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
+        }
+        assert _sign_in_issues(hass) == {}
+
+        # Raised once per period: dismissed, it does not come back.
+        ir.async_delete_issue(hass, DOMAIN, _UNREACHABLE_ISSUE_ID)
+        clock.advance(minutes=10)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        assert _unreachable_issues(hass) == {}
+
+    async def test_setup_unreachable_notice_is_logged_once(
+        self, hass, mock_hub, clock, caplog
+    ):
+        mock_hub.login = AsyncMock(side_effect=APIConnectionError("timeout"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
+            for minutes in (0, 59, 1, 10, 10):
+                clock.advance(minutes=minutes)
+                with pytest.raises(ConfigEntryNotReady):
+                    await self._attempt(hass, entry, mock_hub)
+
+        alerts = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelname == "WARNING"
+            and "No request to Verisure has worked" in r.getMessage()
+        ]
+        assert alerts == [
+            "No request to Verisure has worked for 60 minutes. The integration "
+            "keeps trying; check that the Verisure app works and that Home "
+            "Assistant is online."
+        ]
+
+    async def test_session_handed_back_clears_the_unreachable_notice(
+        self, hass, mock_hub, clock
+    ):
+        """A sign-in made at setup is a request that worked: the notice goes
+        and the next failure starts a fresh period."""
+        mock_hub.login = AsyncMock(side_effect=[APIConnectionError("timeout"), None])
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        clock.advance(minutes=60)
+        raise_unreachable_issue(hass, "test@example.com")
+        assert list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        assert _unreachable_issues(hass) == {}
+        assert "test@example.com" not in hass.data[DOMAIN].get("unreachable", {})
+
+    @pytest.mark.parametrize(
+        ("alert_raised", "kept"),
+        [(True, True), (False, False)],
+        ids=["alert-raised-keeps", "no-alert-clears"],
+    )
+    async def test_reused_session_keeps_the_unreachable_notice_while_alert_raised(
+        self, hass, mock_hub, alert_raised, kept
+    ):
+        """Reusing a co-tenant's session makes no request, so it proves
+        nothing while that session's client still cannot reach Verisure."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        raise_unreachable_issue(hass, "test@example.com")
+        mock_hub.unreachable_alert_raised = alert_raised
+        mock_hub.config_entry = entry
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "test@example.com"
+        ] = {"hub": mock_hub, "holders": {"co-tenant-entry-id"}}
+        hass.data[DOMAIN].setdefault("unreachable", {})["test@example.com"] = {
+            "since": datetime.now(UTC),
+            "alerted": True,
+        }
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        mock_hub.login.assert_not_awaited()
+        assert (list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]) is kept
+        assert "test@example.com" not in hass.data[DOMAIN]["unreachable"]
+
+    async def test_removing_the_last_entry_clears_the_unreachable_notice(
+        self, hass, mock_hub
+    ):
+        mock_hub.login = AsyncMock(side_effect=APIConnectionError("timeout"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        other = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="other@example.com")
+        )
+        other.add_to_hass(hass)
+        _keep_another_account_loaded(hass, "third@example.com")
+        for failing in (entry, other):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, failing, mock_hub)
+        raise_unreachable_issue(hass, "test@example.com")
+        raise_unreachable_issue(hass, "other@example.com")
+
+        await async_remove_entry(hass, entry)
+
+        assert [
+            i.translation_placeholders["username"]
+            for i in _unreachable_issues(hass).values()
+        ] == ["other@example.com"]
+        tracking = hass.data[DOMAIN]["unreachable"]
+        assert "test@example.com" not in tracking
+        assert "other@example.com" in tracking
 
 
 # ===========================================================================
@@ -4411,3 +4680,594 @@ class TestCoTenantStoredTokenRecovery:
 
         assert list(_renewal_refused_issues(hass)) == [_RENEWAL_REFUSED_ISSUE_ID]
         assert entry.data[CONF_REFRESH_TOKEN] == "own"
+
+    async def test_an_unreachable_notice_due_while_detached_appears_on_reattach(
+        self, hass, clock
+    ):
+        """The client alerts once per unreachable period; an alert that came
+        while the hub had no entry is raised when one attaches."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "test@example.com", CONF_REFRESH_TOKEN: "own"},
+        )
+        entry.add_to_hass(hass)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = None
+        hub.client.refresh_token_value = "shared"
+        hub.client._transport.execute = AsyncMock(
+            side_effect=APIConnectionError("no route")
+        )
+        for _ in range(2):
+            with pytest.raises(APIConnectionError):
+                await hub.client._execute_raw({}, "Status")
+            clock.advance(minutes=60)
+        assert hub.unreachable_alert_raised
+        assert _unreachable_issues(hass) == {}
+
+        _attach_token_persistence(hub, entry)
+
+        assert list(_unreachable_issues(hass)) == [_UNREACHABLE_ISSUE_ID]
+
+
+class TestKeptPasswordSync:
+    """The account's shared client uses a kept password only while one of the
+    account's enabled entries has the box ticked."""
+
+    USERNAME = "test@example.com"
+
+    def _entry(self, hass, *, kept, password="test-password", **kwargs):
+        data = make_config_entry_data(password=password)
+        data[CONF_KEEP_PASSWORD] = kept
+        if not kept:
+            data.pop(CONF_PASSWORD, None)
+        entry = MockConfigEntry(domain=DOMAIN, data=data, **kwargs)
+        entry.add_to_hass(hass)
+        return entry
+
+    def _session(self, hass, hub, *holders):
+        session = _new_session_record(hub)
+        session["holders"].update(holders)
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[self.USERNAME] = (
+            session
+        )
+        log_filter = SensitiveDataFilter()
+        hass.data[DOMAIN]["log_filter"] = log_filter
+        return log_filter
+
+    def _register(self, log_filter, password):
+        log_filter.update_secret(
+            f"password:{_hashed_issue_id('', self.USERNAME)}",
+            password,
+            label="[PASSWORD]",
+        )
+
+    async def test_ticked_entry_joining_a_refused_session_signs_in_with_its_password(
+        self, hass, clock
+    ):
+        holder = self._entry(hass, kept=False)
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = holder
+        hub.client.password = ""
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock()
+        self._session(hass, hub, holder.entry_id)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        clock.advance(minutes=15)
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.refresh_refusals_persisting
+
+        joining = self._entry(hass, kept=True, password="joiner-password")
+        data = dict(joining.data)
+        data[CONF_REFRESH_TOKEN] = "own"
+
+        session = await _get_or_create_session(hass, data, joining)
+
+        assert session is hub
+        hub.client.login.assert_awaited_once()
+        assert hub.client.password == "joiner-password"
+        assert hub.client.password_kept is True
+
+    @pytest.mark.parametrize("joins", [True, False])
+    async def test_sync_takes_password_from_ticked_entry_on_join(self, hass, joins):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        self._entry(hass, kept=True, password="kept-password")
+        if joins:
+            log_filter = self._session(hass, hub, "unticked-entry-id")
+        else:
+            hass.data.setdefault(DOMAIN, {})["log_filter"] = SensitiveDataFilter()
+            log_filter = hass.data[DOMAIN]["log_filter"]
+        unticked = self._entry(hass, kept=False)
+
+        with (
+            _patch_hub(hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+        ):
+            await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        assert hub.client.password == "kept-password"
+        assert hub.client.password_kept is True
+        assert log_filter._redact("kept-password") == "[PASSWORD]"
+
+    async def test_sync_clears_password_when_last_ticked_entry_goes(self, hass):
+        hub = make_securitas_hub_mock()
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        unticked = self._entry(hass, kept=False)
+        ticked = self._entry(hass, kept=True, password="kept-password")
+        log_filter = self._session(hass, hub, unticked.entry_id, ticked.entry_id)
+        self._register(log_filter, "kept-password")
+
+        await async_remove_entry(hass, ticked)
+
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+        assert log_filter._redact("kept-password") == "kept-password"
+
+    async def test_sync_ignores_disabled_entries(self, hass):
+        hub = make_securitas_hub_mock()
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        unticked = self._entry(hass, kept=False)
+        self._entry(
+            hass,
+            kept=True,
+            password="other-kept-password",
+            disabled_by=ConfigEntryDisabler.USER,
+        )
+        disabling = self._entry(hass, kept=True, password="kept-password")
+        log_filter = self._session(hass, hub, unticked.entry_id, disabling.entry_id)
+        self._register(log_filter, "kept-password")
+        hass.data[DOMAIN][disabling.entry_id] = {"hub": hub, "devices": []}
+        # ConfigEntry blocks plain attribute assignment.
+        object.__setattr__(disabling, "disabled_by", ConfigEntryDisabler.USER)
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            assert await async_unload_entry(hass, disabling) is True
+
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+
+    def _refused_hub(self, hass, holder, login_error):
+        """The account's shared hub: Verisure refuses its saved sign-in and
+        answers a sign-in with the kept password with ``login_error``."""
+        hub = make_hub(mock_client=False)
+        hub.hass = hass
+        hub.config_entry = holder
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        hub.client.refresh_token_value = "shared"
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        if login_error is not None:
+            hub.client.login = AsyncMock(side_effect=login_error)
+        return hub
+
+    def _ticked_pair_and_other_account(self, hass):
+        home = self._entry(hass, kept=True, password="kept-password")
+        office = self._entry(hass, kept=True, password="kept-password")
+        other_data = make_config_entry_data(
+            username="other@example.com", password="other-password"
+        )
+        other_data[CONF_KEEP_PASSWORD] = True
+        other = MockConfigEntry(domain=DOMAIN, data=other_data)
+        other.add_to_hass(hass)
+        return home, office, other
+
+    def _assert_forgotten_but_ticked(self, *entries):
+        for entry in entries:
+            assert CONF_PASSWORD not in entry.data
+            assert entry.data[CONF_KEEP_PASSWORD] is True
+
+    async def test_rejected_kept_password_is_forgotten_by_the_entries(self, hass):
+        """Runtime: the kept password Verisure rejects goes from every entry
+        of the account, so no restart or joining entry tries it again; the box
+        stays ticked, so the sign-in that follows keeps the new password."""
+        home, office, other = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, login_rejected_error())
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        self._assert_forgotten_but_ticked(home, office)
+        assert other.data[CONF_PASSWORD] == "other-password"
+
+    async def test_rejected_kept_password_is_forgotten_at_setup(self, hass):
+        home, office, other = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, None, AccountBlockedError("blocked"))
+
+        with pytest.raises(AccountBlockedError):
+            await hub.login()
+
+        self._assert_forgotten_but_ticked(home, office)
+        assert other.data[CONF_PASSWORD] == "other-password"
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    async def test_server_fault_at_sign_in_keeps_the_password_on_disk(
+        self, hass, fault
+    ):
+        """Verisure failing to answer a sign-in is not a verdict on the
+        password: it stays in memory and in the entries."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        # The real login, answered by the transport.
+        hub = self._refused_hub(hass, home, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        )
+
+        with pytest.raises(VerisureOwaError) as caught:
+            await hub.client._check_authentication_token()
+        assert not isinstance(caught.value, AuthenticationError)
+
+        assert hub.client.password == "kept-password"
+        assert home.data[CONF_PASSWORD] == "kept-password"
+        assert office.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_wrong_password_reply_at_sign_in_forgets_it_on_disk(self, hass):
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_WRONG_PASSWORD)
+        )
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        self._assert_forgotten_but_ticked(home, office)
+
+    async def test_only_the_rejected_password_is_forgotten(self, hass):
+        """A password saved meanwhile, say by Reconfigure while an old
+        sign-in was still running, is not the one Verisure rejected."""
+        home = self._entry(hass, kept=True, password="kept-password")
+        office = self._entry(hass, kept=True, password="new-password")
+        hub = self._refused_hub(hass, home, login_rejected_error())
+
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+
+        self._assert_forgotten_but_ticked(home)
+        assert office.data[CONF_PASSWORD] == "new-password"
+
+    async def test_rejection_answered_to_a_replaced_session_spares_the_password(
+        self, hass
+    ):
+        """Reconfigure signs in again with the same password and replaces the
+        account's session while the old session's sign-in still waits for its
+        answer. Verisure asking that old sign-in for an SMS code says nothing
+        about the password the new sign-in just saved, so it stays."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        old = self._refused_hub(hass, home, None)
+        self._session(hass, old, home.entry_id, office.entry_id)
+        in_flight = asyncio.Event()
+        answer = asyncio.Event()
+
+        async def login():
+            in_flight.set()
+            await answer.wait()
+            raise TwoFactorRequiredError("2FA required")
+
+        old.client.login = AsyncMock(side_effect=login)
+        sign_in = asyncio.create_task(old.client._check_authentication_token())
+        await asyncio.wait_for(in_flight.wait(), 2)
+        new = make_hub(mock_client=False)
+        new.hass = hass
+        new.client.password = "kept-password"
+        new.client.password_kept = True
+        _replace_account_session(hass, self.USERNAME, new)
+        answer.set()
+
+        with pytest.raises(TwoFactorRequiredError):
+            await sign_in
+
+        assert home.data[CONF_PASSWORD] == "kept-password"
+        assert office.data[CONF_PASSWORD] == "kept-password"
+        assert new.client.password == "kept-password"
+
+    async def test_rejection_answered_after_a_new_password_arrived_spares_it(
+        self, hass
+    ):
+        """Another entry's kept password put in place while a sign-in with the
+        old one waits for its answer: the rejection is of the old one, so the
+        new one stays in the client and in its entry."""
+        home = self._entry(hass, kept=True, password="old-password")
+        office = self._entry(hass, kept=True, password="new-password")
+        hub = self._refused_hub(hass, home, None)
+        hub.client.password = "old-password"
+        self._session(hass, hub, home.entry_id, office.entry_id)
+        sent: list[str] = []
+        in_flight = asyncio.Event()
+        answer = asyncio.Event()
+
+        async def execute(content, *_args, **_kwargs):
+            sent.append(content["variables"]["password"])
+            in_flight.set()
+            await answer.wait()
+            return login_error_reply(LOGIN_WRONG_PASSWORD)
+
+        hub.client._transport.execute = AsyncMock(side_effect=execute)
+        sign_in = asyncio.create_task(hub.client._check_authentication_token())
+        await asyncio.wait_for(in_flight.wait(), 2)
+        hass.config_entries.async_update_entry(
+            home,
+            data={
+                k: v
+                for k, v in home.data.items()
+                if k not in (CONF_PASSWORD, CONF_KEEP_PASSWORD)
+            },
+        )
+        _sync_kept_password(hass, self.USERNAME, forget_unkept=True)
+        assert hub.client.password == "new-password"
+        answer.set()
+
+        with pytest.raises(AuthenticationError):
+            await sign_in
+
+        assert sent == ["old-password"]
+        assert office.data.get(CONF_PASSWORD) == "new-password"
+        assert hub.client.password == "new-password"
+        assert hub.client.password_kept is True
+
+    async def test_ticked_entries_setting_up_together_spend_one_sign_in(self, hass):
+        """Each entry's setup reads its data before waiting for the account:
+        the second must not sign in with the copy it read before the first
+        found the password rejected."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hass.data.setdefault(DOMAIN, {})
+        login = AsyncMock(side_effect=login_rejected_error())
+
+        def build(config, entry, *_args):
+            hub = VerisureHub(config, entry, MagicMock(), hass)
+            hub.client.refresh_token_value = "refused"
+            hub.client.refresh_token = AsyncMock(
+                side_effect=refresh_token_rejected_error()
+            )
+            hub.client.login = login
+            return hub
+
+        with (
+            patch("custom_components.securitas.VerisureHub", side_effect=build),
+            patch("custom_components.securitas.async_get_clientsession"),
+        ):
+            results = await asyncio.gather(
+                _get_or_create_session(hass, dict(home.data), home),
+                _get_or_create_session(hass, dict(office.data), office),
+                return_exceptions=True,
+            )
+
+        assert all(isinstance(r, Exception) for r in results)
+        login.assert_awaited_once()
+        self._assert_forgotten_but_ticked(home, office)
+
+    def _dead_token_setup(self, hass, refusal, login):
+        """Patch in real hubs whose stored sign-in Verisure turns down with
+        ``refusal`` and whose password sign-in is ``login``; returns the
+        hubs built and the patches."""
+        log_filter = SensitiveDataFilter()
+        hass.data.setdefault(DOMAIN, {})["log_filter"] = log_filter
+        built: list[VerisureHub] = []
+
+        def build(config, entry, *_args):
+            hub = VerisureHub(config, entry, MagicMock(), hass)
+            hub.client.refresh_token_value = "dead"
+            hub.client.refresh_token = AsyncMock(side_effect=refusal())
+            hub.client.login = login
+            built.append(hub)
+            return hub
+
+        patches = contextlib.ExitStack()
+        patches.enter_context(
+            patch("custom_components.securitas.VerisureHub", side_effect=build)
+        )
+        patches.enter_context(
+            patch("custom_components.securitas.async_get_clientsession")
+        )
+        return log_filter, built, patches
+
+    @staticmethod
+    def _genuine_rejection():
+        err = VerisureOwaError("Invalid session")
+        err.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        return err
+
+    @pytest.mark.parametrize("verdict", ["refused", "rejected"])
+    async def test_unticked_entry_setting_up_first_signs_in_with_a_kept_password(
+        self, hass, verdict
+    ):
+        """After a restart the unticked entry of the account may set up before
+        the ticked one: the shared sign-in still uses the kept password, which
+        is hidden from the log before it is sent and never saved to the
+        unticked entry."""
+        unticked = self._entry(hass, kept=False)
+        ticked = self._entry(hass, kept=True, password="kept-password")
+        refusal = (
+            refresh_token_rejected_error
+            if verdict == "refused"
+            else self._genuine_rejection
+        )
+        sent: list[tuple[str, bool, str]] = []
+
+        async def login():
+            client = built[0].client
+            sent.append(
+                (
+                    client.password,
+                    client.password_kept,
+                    log_filter._redact("kept-password"),
+                )
+            )
+
+        log_filter, built, patches = self._dead_token_setup(
+            hass, refusal, AsyncMock(side_effect=login)
+        )
+        with patches:
+            hub = await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        assert sent == [("kept-password", True, "[PASSWORD]")]
+        hub._persist_refresh_token("rotated")
+        assert unticked.data[CONF_REFRESH_TOKEN] == "rotated"
+        assert CONF_PASSWORD not in unticked.data
+        assert unticked.data[CONF_KEEP_PASSWORD] is False
+        assert ticked.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_kept_password_rejected_for_an_unticked_entry_is_forgotten(
+        self, hass
+    ):
+        unticked = self._entry(hass, kept=False)
+        home, office, other = self._ticked_pair_and_other_account(hass)
+        login = AsyncMock(side_effect=login_rejected_error())
+        _, built, patches = self._dead_token_setup(
+            hass, refresh_token_rejected_error, login
+        )
+
+        with patches, pytest.raises(AuthenticationError):
+            await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        login.assert_awaited_once()
+        self._assert_forgotten_but_ticked(home, office)
+        assert other.data[CONF_PASSWORD] == "other-password"
+        assert built[0].client.password == ""
+        assert CONF_PASSWORD not in unticked.data
+
+    async def test_disabled_and_other_account_entries_lend_no_password(self, hass):
+        unticked = self._entry(hass, kept=False)
+        self._entry(
+            hass,
+            kept=True,
+            password="disabled-password",
+            disabled_by=ConfigEntryDisabler.USER,
+        )
+        other_data = make_config_entry_data(
+            username="other@example.com", password="other-password"
+        )
+        other_data[CONF_KEEP_PASSWORD] = True
+        MockConfigEntry(domain=DOMAIN, data=other_data).add_to_hass(hass)
+        login = AsyncMock()
+        _, built, patches = self._dead_token_setup(hass, self._genuine_rejection, login)
+
+        with patches, pytest.raises(AuthenticationError):
+            await _get_or_create_session(hass, dict(unticked.data), unticked)
+
+        login.assert_not_awaited()
+        assert built[0].client.password == ""
+        assert built[0].client.password_kept is False
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    async def test_server_fault_at_setup_sign_in_waits_to_retry(self, hass, fault):
+        """Setup: a server fault answering the kept-password sign-in after a
+        refusal retries later and still counts the refusal; it does not ask
+        to sign in again."""
+        home, _, _ = self._ticked_pair_and_other_account(hass)
+        hass.data.setdefault(DOMAIN, {})
+        hub = self._refused_hub(hass, None, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        )
+
+        with pytest.raises(ConfigEntryNotReady):
+            await _login_or_raise(hass, hub, "test@example.com")
+
+        assert "test@example.com" in hass.data[DOMAIN]["refresh_refusals"]
+        assert _sign_in_issues(hass) == {}
+        assert home.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_wrong_password_at_setup_sign_in_asks_to_sign_in_again(self, hass):
+        self._ticked_pair_and_other_account(hass)
+        hass.data.setdefault(DOMAIN, {})
+        hub = self._refused_hub(hass, None, None)
+        hub.client._transport.execute = AsyncMock(
+            return_value=login_error_reply(LOGIN_WRONG_PASSWORD)
+        )
+
+        with pytest.raises(AuthenticationError):
+            await _login_or_raise(hass, hub, "test@example.com")
+
+        assert list(_sign_in_issues(hass)) == [_SIGN_IN_ISSUE_ID]
+
+    async def test_kept_password_failing_transiently_stays_in_the_entries(self, hass):
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, APIConnectionError("reset"))
+
+        with pytest.raises(APIConnectionError):
+            await hub.client._check_authentication_token()
+
+        assert home.data[CONF_PASSWORD] == "kept-password"
+        assert office.data[CONF_PASSWORD] == "kept-password"
+
+    async def test_ticked_entry_joining_after_a_rejection_does_not_sign_in(
+        self, hass, clock
+    ):
+        """The other ticked entry joining the session afterwards brings no
+        password, so trying its own token, refused too, makes no sign-in."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        hub = self._refused_hub(hass, home, login_rejected_error())
+        self._session(hass, hub, home.entry_id)
+        with pytest.raises(AuthenticationError):
+            await hub.client._check_authentication_token()
+        clock.advance(minutes=15)
+        hub.client.authentication_token_exp = datetime.min
+        with pytest.raises(VerisureOwaError):
+            await hub.client._check_authentication_token()
+        assert hub.refresh_refusals_persisting
+        data = dict(office.data)
+        data[CONF_REFRESH_TOKEN] = "own"
+
+        with pytest.raises(ConfigEntryNotReady):
+            await _get_or_create_session(hass, data, office)
+
+        hub.client.login.assert_awaited_once()
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+
+    async def test_plain_unload_and_reload_keep_the_kept_password(self, hass):
+        """A reload, or Home Assistant stopping, is not the user saying no:
+        the shared client keeps the ticked entry's password, and the log
+        filter keeps hiding it."""
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        hub.client.password = "kept-password"
+        hub.client.password_kept = True
+        unticked = self._entry(hass, kept=False)
+        ticked = self._entry(hass, kept=True, password="kept-password")
+        log_filter = self._session(hass, hub, unticked.entry_id, ticked.entry_id)
+        self._register(log_filter, "kept-password")
+        hass.data[DOMAIN][ticked.entry_id] = {"hub": hub, "devices": []}
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            assert await async_unload_entry(hass, ticked) is True
+
+        assert hub.client.password == "kept-password"
+        assert hub.client.password_kept is True
+        assert log_filter._redact("kept-password") == "[PASSWORD]"
+
+        await _get_or_create_session(hass, dict(ticked.data), ticked)
+
+        assert hub.client.password == "kept-password"
+        assert hub.client.password_kept is True
+        assert log_filter._redact("kept-password") == "[PASSWORD]"
+
+    async def test_sync_leaves_in_memory_password_alone(self, hass):
+        hub = make_securitas_hub_mock()
+        hub.client.password = "just-typed"
+        hub.client.password_kept = False
+        holder = self._entry(hass, kept=False)
+        self._session(hass, hub, holder.entry_id)
+        joining = self._entry(hass, kept=False)
+
+        await _get_or_create_session(hass, dict(joining.data), joining)
+
+        assert hub.client.password == "just-typed"
+        assert hub.client.password_kept is False

@@ -60,7 +60,8 @@ class SensitiveDataFilter(logging.Filter):
 
     def __init__(self) -> None:
         super().__init__()
-        # Maps raw secret value -> redaction label
+        # Maps raw secret value -> redaction label, longest value first so a
+        # secret containing another is replaced whole.
         self._secrets: dict[str, str] = {}
         # Maps secret key -> current raw value (for replacement on update)
         self._keys: dict[str, str] = {}
@@ -70,21 +71,35 @@ class SensitiveDataFilter(logging.Filter):
         if not number:
             return
         masked = "***" if len(number) <= 4 else "***" + number[-4:]
-        self._secrets[number] = masked
+        self._add(number, masked)
 
-    def update_secret(self, key: str, value: str | None) -> None:
-        """Register or update a sensitive value for redaction."""
-        # Remove old value for this key if it exists
+    def update_secret(
+        self, key: str, value: str | None, *, label: str | None = None
+    ) -> None:
+        """Register or update a sensitive value for redaction.
+
+        ``label`` replaces the label looked up from ``key``, for keys that carry
+        a per-account suffix the log must not show.
+        """
         old = self._keys.pop(key, None)
-        if old and old in self._secrets:
+        # Two accounts may share a password: the value stays while another key
+        # still holds it.
+        if old and old in self._secrets and old not in self._keys.values():
             del self._secrets[old]
 
         if not value:
             return
 
-        label = _REDACTION_LABELS.get(key, f"[{key.upper()}]")
-        self._secrets[value] = label
+        if label is None:
+            label = _REDACTION_LABELS.get(key, f"[{key.upper()}]")
+        self._add(value, label)
         self._keys[key] = value
+
+    def _add(self, value: str, label: str) -> None:
+        secrets = {**self._secrets, value: label}
+        self._secrets = dict(
+            sorted(secrets.items(), key=lambda item: len(item[0]), reverse=True)
+        )
 
     def _redact(self, text: str) -> str:
         """Replace all known secret values in a string."""

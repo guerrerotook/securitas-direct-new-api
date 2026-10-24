@@ -55,6 +55,8 @@ MORE_INFO_ELEMENT = "more-info-verisure-owa-alarm"
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
 CONF_REFRESH_TOKEN = "refresh_token"
+# True when the owner chose to store the password, unencrypted, in entry data.
+CONF_KEEP_PASSWORD = "keep_password"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
 # The alarm/lock PIN is persisted hashed (see pin_crypto.hash_pin), never as
 # plain text — CONF_CODE (homeassistant.const) is only used as the config-

@@ -24,14 +24,15 @@ from pydantic import BaseModel, ValidationError
 
 from ..exceptions import (
     _ACCOUNT_BLOCKED_ERROR_CODE,
+    _GENUINE_AUTH_ERROR_CODES,
     APIConnectionError,
     OperationTimeoutError,
     SessionExpiredError,
     VerisureOwaError,
     _error_code_from_body,
     dead_refresh_token_signal,
+    is_credential_rejection,
     is_genuine_auth_failure,
-    is_refresh_login_crash,
 )
 from ..http_transport import HttpTransport
 from ..models import Installation, OtpPhone
@@ -64,6 +65,25 @@ def _format_graphql_error(
         if message:
             return f"{field_name} failed: {message}"
     return fallback
+
+
+def _is_unusable_reply(response: object) -> bool:
+    """True for a reply that carries no data value at all, with or without
+    errors (in list or dict form), or that is not an object.
+
+    No typed envelope accepts one. Some raw readers still act on one
+    (get_services returns an empty catalog, validate_device returns the
+    SMS-code challenge, login turns a wrong-password reply into
+    AuthenticationError, logout ignores the reply), and each still counts
+    here as a failure. Only an account-blocked (60052) or invalid-session
+    (60067) reply is excluded.
+    """
+    if not isinstance(response, dict):
+        return True
+    data = response.get("data")
+    if isinstance(data, dict) and any(value is not None for value in data.values()):
+        return False
+    return _error_code_from_body(response) not in _GENUINE_AUTH_ERROR_CODES
 
 
 def _token_fingerprint(token: str | None) -> str:
@@ -101,6 +121,9 @@ _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
 # between, the host is alerted and renewals slow to one per REFRESH_REFUSAL_RETRY_EVERY.
 REFRESH_REFUSAL_ALERT_AFTER = timedelta(minutes=15)
 REFRESH_REFUSAL_RETRY_EVERY = timedelta(minutes=5)
+# No request to Verisure has worked for this long, counted from the first
+# failure after the last success: the host is alerted once.
+UNREACHABLE_ALERT_AFTER = timedelta(hours=1)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
 # The open issue tracking the xSRefreshLogin server crash; the recruitment
 # WARNING points affected users straight at it.
@@ -142,6 +165,7 @@ class _ClientBase:
         username: str,
         password: str,
         *,
+        password_kept: bool = False,
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
@@ -151,6 +175,8 @@ class _ClientBase:
         refresh_token: str | None = None,
         on_refresh_token_changed: Callable[[str], None] | None = None,
         on_refresh_refusal_alert: Callable[[bool], None] | None = None,
+        on_unreachable_alert: Callable[[bool], None] | None = None,
+        on_kept_password_rejected: Callable[[str], None] | None = None,
     ) -> None:
         # Transport
         self._transport = transport
@@ -158,6 +184,9 @@ class _ClientBase:
         # Credentials & locale
         self.username = username
         self.password = password
+        # True only when the user chose to keep the password: it is then spent
+        # at the first refusal rather than once refusals persist.
+        self.password_kept = password_kept
         self.country = country.upper()
         self.language = language
 
@@ -204,6 +233,13 @@ class _ClientBase:
         self._refusal_alert_raised: bool = False
         self._on_refresh_refusal_alert: Callable[[bool], None] | None = (
             on_refresh_refusal_alert
+        )
+        # UTC, like the refusal period.
+        self._unreachable_since: datetime | None = None
+        self._unreachable_alert_raised: bool = False
+        self._on_unreachable_alert: Callable[[bool], None] | None = on_unreachable_alert
+        self._on_kept_password_rejected: Callable[[str], None] | None = (
+            on_kept_password_rejected
         )
 
         # Device configuration
@@ -561,8 +597,9 @@ class _ClientBase:
                     # password surfaces as a clean reauth signal. Anything else
                     # (5xx, a timeout, or Verisure refusing the token) may be a
                     # passing fault: don't spend a login; record it and
-                    # propagate so the coordinator retries. A stored password is
-                    # spent only once refusals persist.
+                    # propagate so the coordinator retries. A password held in
+                    # memory is spent only once refusals persist; a kept one at
+                    # the first refusal.
                     if is_genuine_auth_failure(owa_err):
                         _LOGGER.warning(
                             "Refresh token genuinely rejected, falling back to "
@@ -575,28 +612,71 @@ class _ClientBase:
                             self._note_refresh_refusal(signal)
                         if not (
                             signal is not None
-                            and self._refusals_persisting
                             and self.password
+                            and (self._refusals_persisting or self.password_kept)
                         ):
                             self.record_auth_recovery_failure(owa_err)
                             if isinstance(err, VerisureOwaError):
                                 raise
                             raise owa_err from err
-                        _LOGGER.warning(
-                            "Verisure keeps refusing the refresh token, "
-                            "falling back to login"
-                        )
+                        if self._refusals_persisting:
+                            _LOGGER.warning(
+                                "Verisure keeps refusing the refresh token, "
+                                "falling back to login"
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "Verisure refused the refresh token (%s); "
+                                "signing in with the kept password",
+                                signal,
+                            )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
-            # pylint: disable=no-member  # provided by _AuthMixin
-            await self.login()  # type: ignore[attr-defined]
+            submitted, kept = self.password, self.password_kept
+            try:
+                # pylint: disable=no-member  # provided by _AuthMixin
+                await self.login()  # type: ignore[attr-defined]
+            except VerisureOwaError as err:
+                self.forget_rejected_password(err, submitted, kept=kept)
+                raise
+
+    def forget_rejected_password(
+        self, err: VerisureOwaError, password: str, *, kept: bool
+    ) -> None:
+        """Stop signing in by itself with a password Verisure has rejected.
+
+        Verisure blocks the account after three failed sign-ins, and every
+        coordinator sharing this client would otherwise spend one. The user
+        types the password again when asked to sign in again. A rejected kept
+        password is passed to the host, which removes its stored copy.
+
+        ``password`` and ``kept`` describe the sign-in that was rejected and
+        must be read before it is awaited: another entry's password can be
+        put in place while it waits for Verisure's answer, and that one stays.
+        """
+        if not is_credential_rejection(err):
+            return
+        if self.password == password:
+            self.password = ""
+            self.password_kept = False
+        if not (kept and password) or self._on_kept_password_rejected is None:
+            return
+        try:
+            self._on_kept_password_rejected(password)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning("on_kept_password_rejected callback raised", exc_info=True)
 
     def _pace_refused_renewal(self) -> None:
-        """Raise without contacting Verisure while persisting refusals are paced.
+        """Raise without contacting Verisure while refusals are paced: once
+        they persist, or from the first one when the password is kept, since a
+        kept password is spent at every refusal that is not paced.
 
         Not recorded as a recovery failure: no attempt was made.
         """
         last = self._last_renewal_attempt
-        if not self._refusals_persisting or last is None:
+        refusing = self._refusals_persisting or (
+            self.password_kept and self._refresh_refused_since is not None
+        )
+        if not refusing or last is None:
             return
         next_try = last + REFRESH_REFUSAL_RETRY_EVERY
         if datetime.now(UTC) < next_try:
@@ -653,6 +733,45 @@ class _ClientBase:
     def refresh_refusal_alert_raised(self) -> bool:
         """True from the refusal alert until a renewal succeeds."""
         return self._refusal_alert_raised
+
+    def _note_request_failure(self) -> None:
+        """Track a request Verisure gave no usable reply to; alert once."""
+        now = datetime.now(UTC)
+        since = self._unreachable_since
+        if since is None:
+            self._unreachable_since = now
+            return
+        if self._unreachable_alert_raised or now - since < UNREACHABLE_ALERT_AFTER:
+            return
+        self._unreachable_alert_raised = True
+        _LOGGER.warning(
+            "No request to Verisure has worked for %d minutes. The integration "
+            "keeps trying; check that the Verisure app works and that Home "
+            "Assistant is online.",
+            int((now - since).total_seconds() // 60),
+        )
+        self._notify_unreachable_alert(True)
+
+    def _note_request_success(self) -> None:
+        """End the unreachable period; clear the alert if it was raised."""
+        self._unreachable_since = None
+        if self._unreachable_alert_raised:
+            self._unreachable_alert_raised = False
+            self._notify_unreachable_alert(False)
+
+    def _notify_unreachable_alert(self, active: bool) -> None:
+        """Tell the host; a failing host callback must not break requests."""
+        if self._on_unreachable_alert is None:
+            return
+        try:
+            self._on_unreachable_alert(active)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning("on_unreachable_alert callback raised", exc_info=True)
+
+    @property
+    def unreachable_alert_raised(self) -> bool:
+        """True from the unreachable alert until a request succeeds."""
+        return self._unreachable_alert_raised
 
     @property
     def renewal_lock(self) -> asyncio.Lock:
@@ -776,7 +895,13 @@ class _ClientBase:
         without spamming healthy installations, where the noisy per-rotation
         lines stay on DEBUG.
         """
-        if self._refresh_crash_reported or not is_refresh_login_crash(err):
+        # A crash that also carries a server fault or a genuine credential
+        # failure (err 60052 or 60067) is not a refusal, so the Repairs notice
+        # this warning promises never comes.
+        if (
+            self._refresh_crash_reported
+            or dead_refresh_token_signal(err) != "refresh-login crash"
+        ):
             return
         self._refresh_crash_reported = True
         _LOGGER.warning(
@@ -902,9 +1027,18 @@ class _ClientBase:
         them so no credential-bearing request is ever repeated by the transport.
         """
         headers = self._build_headers(operation, installation=installation)
-        return await self._transport.execute(
-            content, headers, retry_on_403=operation not in _AUTH_OPERATIONS
-        )
+        try:
+            response = await self._transport.execute(
+                content, headers, retry_on_403=operation not in _AUTH_OPERATIONS
+            )
+        except (VerisureOwaError, TimeoutError):
+            self._note_request_failure()
+            raise
+        if _is_unusable_reply(response):
+            self._note_request_failure()
+        else:
+            self._note_request_success()
+        return response
 
     # ── Poll operation ───────────────────────────────────────────────────
 

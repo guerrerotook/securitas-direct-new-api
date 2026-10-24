@@ -22,12 +22,22 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     _error_code_from_body,
     dead_refresh_token_signal,
     is_account_blocked,
+    is_credential_rejection,
     is_genuine_auth_failure,
     is_refresh_login_crash,
     is_refresh_token_rejected,
 )
 
-from .conftest import refresh_login_crash_error, refresh_token_rejected_error
+from .conftest import (
+    LOGIN_SERVER_FAULTS,
+    login_error_reply,
+    login_rejected_error,
+    refresh_login_crash_error,
+    refresh_timeout_reply_error,
+    refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
+    refresh_token_rejected_error,
+)
 
 # ── Subclass checks ───────────────────────────────────────────────────────────
 
@@ -370,10 +380,19 @@ class TestIsRefreshLoginCrash:
 
 
 class TestIsRefreshTokenRejected:
-    """Identifies Verisure refusing the stored refresh token with err 4 / 404."""
+    """Identifies Verisure refusing the stored token: err 4 / 404 or err 7 / 401."""
 
     def test_err_4_on_refresh_login_matches(self):
         assert is_refresh_token_rejected(refresh_token_rejected_error()) is True
+
+    def test_err_7_on_refresh_login_matches(self):
+        """#652: Verisure refused renewals with err 7 / 401 until a new sign-in."""
+        assert is_refresh_token_rejected(refresh_token_rejected_err7_error()) is True
+
+    def test_err_7_on_a_different_path_does_not_match(self):
+        err = refresh_token_rejected_err7_error()
+        err.response_body["errors"][0]["path"] = ["xSArmPanel"]
+        assert is_refresh_token_rejected(err) is False
 
     def test_err_4_on_a_different_path_does_not_match(self):
         err = refresh_token_rejected_error()
@@ -420,6 +439,11 @@ class TestDeadRefreshTokenSignal:
             "refresh-token rejection (err 4)"
         )
 
+    def test_err_7_rejection_is_named(self):
+        assert dead_refresh_token_signal(refresh_token_rejected_err7_error()) == (
+            "refresh-token rejection (err 7)"
+        )
+
     def test_genuine_invalid_session_is_not_a_signal(self):
         err = refresh_token_rejected_error()
         err.response_body["errors"][0]["data"]["err"] = "60067"
@@ -441,6 +465,61 @@ class TestDeadRefreshTokenSignal:
 
     def test_no_response_body_is_not_a_signal(self):
         assert dead_refresh_token_signal(VerisureOwaError("boom")) is None
+
+    @staticmethod
+    def _refresh_error(data: dict, *, path: list[str] | None = None):
+        err = VerisureOwaError("boom")
+        err.response_body = {
+            "errors": [
+                {
+                    "message": "boom",
+                    "name": "ApiError",
+                    "data": data,
+                    "path": path or ["xSRefreshLogin"],
+                }
+            ],
+            "data": {"xSRefreshLogin": None},
+        }
+        return err
+
+    def test_unknown_code_on_refresh_login_is_a_refusal(self):
+        err = self._refresh_error({"res": "ERROR", "err": "99", "status": 401})
+        assert dead_refresh_token_signal(err) == "refresh-token rejection (err 99)"
+
+    def test_error_without_code_on_refresh_login_is_a_refusal(self):
+        err = self._refresh_error({})
+        assert dead_refresh_token_signal(err) == "refresh-login error"
+
+    def test_verisure_timeout_reply_is_not_a_refusal(self):
+        assert dead_refresh_token_signal(refresh_timeout_reply_error()) is None
+
+    def test_server_status_on_refresh_login_is_not_a_refusal(self):
+        err = self._refresh_error({"res": "ERROR", "err": "7", "status": 503})
+        assert dead_refresh_token_signal(err) is None
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param({"data": {"status": 503}}, id="status-503"),
+            pytest.param({"name": "TimeoutError"}, id="timeout-name"),
+            pytest.param({"data": {"err": "TimeoutError"}}, id="timeout-code"),
+            pytest.param({"data": {"err": "60067"}}, id="err-60067"),
+        ],
+    )
+    def test_crash_that_also_says_server_fault_or_genuine_is_not_a_refusal(self, extra):
+        """The crash message does not outrank what the rest of the error
+        says: a 5xx status or Verisure's timeout reply is a server fault, and
+        60067 is a genuine rejection."""
+        err = refresh_login_crash_error()
+        err.response_body["errors"][0].update(extra)
+        assert exceptions.is_refresh_login_crash(err)
+        assert dead_refresh_token_signal(err) is None
+
+    def test_unknown_code_on_another_path_is_not_a_refusal(self):
+        err = self._refresh_error(
+            {"res": "ERROR", "err": "99", "status": 401}, path=["xSArmPanel"]
+        )
+        assert dead_refresh_token_signal(err) is None
 
 
 # ── _error_code_from_body ─────────────────────────────────────────────────────
@@ -464,7 +543,52 @@ class TestRefusalsNeverAskForReauth:
         assert not hasattr(exceptions, "RefreshTokenDeadError")
 
     @pytest.mark.parametrize(
-        "make_err", [refresh_login_crash_error, refresh_token_rejected_error]
+        "make_err",
+        [
+            refresh_login_crash_error,
+            refresh_token_rejected_error,
+            refresh_token_rejected_err7_error,
+            refresh_token_rejected_err99_error,
+        ],
     )
     def test_refusal_is_not_genuine(self, make_err):
         assert is_genuine_auth_failure(make_err()) is False
+
+
+# ── is_credential_rejection ──────────────────────────────────────────────────
+
+
+def _login_auth_error(error: dict) -> AuthenticationError:
+    body = login_error_reply(error)
+    err = AuthenticationError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
+
+
+class TestIsCredentialRejection:
+    """Only Verisure's verdict on the credentials counts: a server fault in the
+    reply does not, even on an AuthenticationError."""
+
+    @pytest.mark.parametrize(
+        "make_error",
+        [
+            pytest.param(login_rejected_error, id="wrong-password"),
+            pytest.param(lambda: AccountBlockedError("blocked"), id="blocked"),
+            pytest.param(lambda: TwoFactorRequiredError("sms code"), id="sms-code"),
+        ],
+    )
+    def test_verdicts(self, make_error):
+        assert is_credential_rejection(make_error()) is True
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    def test_server_faults_are_not_verdicts_even_as_authentication_error(self, fault):
+        err = _login_auth_error(LOGIN_SERVER_FAULTS[fault])
+        assert is_credential_rejection(err) is False
+        assert is_genuine_auth_failure(err) is True
+
+    def test_raised_locally_without_a_reply_is_not_a_verdict(self):
+        err = AuthenticationError("Cannot login: no password available")
+        assert is_credential_rejection(err) is False
+
+    def test_transient_error_is_not_a_verdict(self):
+        assert is_credential_rejection(APIConnectionError("reset")) is False

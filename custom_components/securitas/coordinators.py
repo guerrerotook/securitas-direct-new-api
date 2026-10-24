@@ -169,28 +169,33 @@ async def _handle_session_expired(
     When a password is available, attempt a full re-login (it can recover a
     genuinely dead refresh token) and classify the outcome.
     """
-    if not client.password:
-        # The token was just refreshed successfully, so this lingering 403 is a
-        # transient backend desync. Keep the server's original error for
-        # diagnostics and chaining rather than fabricating a generic one.
-        client.record_auth_recovery_failure(err)
-        raise UpdateFailed(f"Transient session error, will retry: {err}") from err
-    try:
-        await client.login()
-    except (TimeoutError, VerisureOwaError) as login_err:
-        owa_err = (
-            login_err
-            if isinstance(login_err, VerisureOwaError)
-            else VerisureOwaError(f"Login timed out: {login_err!r}")
-        )
-        if is_genuine_auth_failure(owa_err):
-            raise ConfigEntryAuthFailed(
-                f"Re-authentication failed: {owa_err}"
+    # One coordinator at a time, so a password Verisure rejects, and the
+    # client then drops, is not sent again by the others queued here.
+    async with client.renewal_lock:
+        if not client.password:
+            # The token was just refreshed successfully, so this lingering 403
+            # is a transient backend desync. Keep the server's original error
+            # for diagnostics and chaining rather than fabricating a generic one.
+            client.record_auth_recovery_failure(err)
+            raise UpdateFailed(f"Transient session error, will retry: {err}") from err
+        submitted, kept = client.password, client.password_kept
+        try:
+            await client.login()
+        except (TimeoutError, VerisureOwaError) as login_err:
+            owa_err = (
+                login_err
+                if isinstance(login_err, VerisureOwaError)
+                else VerisureOwaError(f"Login timed out: {login_err!r}")
+            )
+            client.forget_rejected_password(owa_err, submitted, kept=kept)
+            if is_genuine_auth_failure(owa_err):
+                raise ConfigEntryAuthFailed(
+                    f"Re-authentication failed: {owa_err}"
+                ) from login_err
+            client.record_auth_recovery_failure(owa_err)
+            raise UpdateFailed(
+                f"Transient auth error, will retry: {owa_err}"
             ) from login_err
-        client.record_auth_recovery_failure(owa_err)
-        raise UpdateFailed(
-            f"Transient auth error, will retry: {owa_err}"
-        ) from login_err
 
 
 async def _fetch_with_session_recovery[T](

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import socket
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -70,6 +70,7 @@ from . import (
     _async_teardown_domain_if_unused,
     _async_update_duplicate_entry_issues,
     _clear_setup_refresh_refusals,
+    _clear_setup_unreachable,
     _clear_sign_in_issues,
     _flow_session_holder,
     _login_ipv4_then_any,
@@ -79,6 +80,7 @@ from . import (
     _replace_account_session,
     _resolve_flow_capabilities,
     _store_installations_cache,
+    _sync_kept_password,
     _take_session_hold,
     _unique_id_for,
     generate_uuid,
@@ -92,12 +94,14 @@ from .const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_KEEP_PASSWORD,
     CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
     DEFAULT_ENABLE_ACTIVITY_POLLING,
     LOCK_CIRCUITS,
     PANEL_OPTION_KEYS,
 )
+from .hub import setup_passwords
 from .pin_crypto import encode_pin
 from .verisure_owa_api import (
     PERI_DEFAULTS,
@@ -152,11 +156,13 @@ SECTION_PIN = "pin"
 SECTION_NOTIFICATIONS = "notifications"
 SECTION_SUBPANELS = "subpanels"
 SECTION_ACTIVITY = "activity"
+SECTION_SIGN_IN = "sign_in"
 _ALL_SECTIONS = (
     SECTION_PIN,
     SECTION_NOTIFICATIONS,
     SECTION_SUBPANELS,
     SECTION_ACTIVITY,
+    SECTION_SIGN_IN,
     CONF_ADVANCED,
 )
 
@@ -361,12 +367,14 @@ def _build_settings_schema(
     *,
     use_suggested: bool = False,
     extra_fields: dict[Any, Any] | None = None,
+    keep_password_default: bool | None = None,
 ) -> vol.Schema:
     """Build the shared sectioned settings schema for config and options flows.
 
     Layout: a PIN section, a Force-arm-notifications section, an optional
     Sub-panels section (only present when ``extra_fields`` is non-empty),
-    and a collapsed Advanced section. Section payloads are flattened back
+    an optional Sign-in section (only present when ``keep_password_default``
+    is given), and a collapsed Advanced section. Section payloads are flattened back
     to top-level keys by ``_flatten_sections`` before persistence — the
     saved data shape is unchanged.
 
@@ -493,6 +501,13 @@ def _build_settings_schema(
             {"collapsed": False},
         )
     schema_dict[vol.Optional(SECTION_ACTIVITY)] = activity_section
+    if keep_password_default is not None:
+        schema_dict[vol.Optional(SECTION_SIGN_IN)] = section(
+            vol.Schema(
+                {vol.Optional(CONF_KEEP_PASSWORD, default=keep_password_default): bool}
+            ),
+            {"collapsed": False},
+        )
     schema_dict[vol.Optional(CONF_ADVANCED)] = advanced_section
     return vol.Schema(schema_dict)
 
@@ -535,7 +550,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _create_entry_for_installation(
         self, installation: Installation
     ) -> config_entries.ConfigFlowResult:
-        """Register a new entry, persisting the refresh token (not the password)."""
+        """Register a new entry with the refresh token, and the password only
+        when the user ticked the box to keep it."""
         username = self.config[CONF_USERNAME]
         unique_id = _unique_id_for(username, installation.number)
         await self.async_set_unique_id(unique_id)
@@ -556,7 +572,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
             return self.async_abort(reason="no_refresh_token")
         entry_data = dict(self.config)
-        entry_data.pop(CONF_PASSWORD, None)
+        entry_data[CONF_KEEP_PASSWORD] = bool(entry_data.get(CONF_KEEP_PASSWORD))
+        if not entry_data[CONF_KEEP_PASSWORD]:
+            entry_data.pop(CONF_PASSWORD, None)
         entry_data[CONF_REFRESH_TOKEN] = refresh_token
         return self.async_create_entry(
             title=installation.alias,
@@ -733,6 +751,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(CONF_USERNAME, default=d.get(CONF_USERNAME, "")): str,
                 vol.Required(CONF_PASSWORD): str,
+                vol.Optional(
+                    CONF_KEEP_PASSWORD, default=d.get(CONF_KEEP_PASSWORD, False)
+                ): bool,
             }
         )
 
@@ -748,18 +769,22 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_DELAY_CHECK_OPERATION] = DEFAULT_DELAY_CHECK_OPERATION
         self.config[CONF_DEVICE_INDIGITALL] = ""
         self.config[CONF_ENTRY_ID] = ""
-        # Reuse existing session for this username if one is already running,
-        # to avoid a new login that would invalidate the active session.
         username = self.config[CONF_USERNAME]
         session = self.hass.data.get(DOMAIN, {}).get("sessions", {}).get(username)
-        if session is not None:
-            # Held before finish_setup awaits: the last entry unloading
-            # meanwhile would otherwise drop the session under us.
+        if session is not None and not self.config.get(CONF_KEEP_PASSWORD):
+            # Unticked, the account's running session is reused: a new login
+            # would invalidate it. Held before finish_setup awaits: the last
+            # entry unloading meanwhile would otherwise drop the session.
             self._borrow_session(username, session)
         else:
-            uuid = generate_uuid()
-            self.config[CONF_DEVICE_ID] = uuid
-            self.config[CONF_UNIQUE_ID] = uuid
+            # A password to keep is checked by signing in with it, which
+            # finish_setup then makes the account's session.
+            if session is not None:
+                self._use_session_device_ids(session)
+            else:
+                uuid = generate_uuid()
+                self.config[CONF_DEVICE_ID] = uuid
+                self.config[CONF_UNIQUE_ID] = uuid
             self.hub = self._create_client()
         return await self.finish_setup()
 
@@ -798,6 +823,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+            self.config[CONF_KEEP_PASSWORD] = bool(
+                user_input.get(CONF_KEEP_PASSWORD, False)
+            )
             self.config[CONF_USERNAME] = user_input.get(
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
             )
@@ -843,6 +871,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         assert self._reauth_entry is not None
         username = self._reauth_entry.data.get(CONF_USERNAME, "")
+        # Starts as the entry's choice; after a failed submission, the one just made.
+        keep_password = bool(self.config.get(CONF_KEEP_PASSWORD, False))
         return self.async_show_form(
             step_id=(
                 "reconfigure"
@@ -853,13 +883,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_USERNAME, default=username): str,
                     vol.Required(CONF_PASSWORD): str,
+                    vol.Optional(CONF_KEEP_PASSWORD, default=keep_password): bool,
                 }
             ),
             errors=errors or {},
         )
 
     async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
-        """Capture a fresh refresh token and reload; the supplied password is never persisted."""
+        """Capture a fresh refresh token and reload; the supplied password is
+        kept only on entries whose box is ticked."""
         assert self._reauth_entry is not None
         assert self.hub is not None
         # Checked again under the account lock; here, before the checks
@@ -919,17 +951,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 # reload's setup could join it.
                 _take_session_hold(registered, self._session_holder)
                 self._save_reauth_entry(username, installation, switched, refresh_token)
-                account_entries = [
-                    entry
-                    for entry in self.hass.config_entries.async_entries(DOMAIN)
-                    if entry is not self._reauth_entry
-                    and entry.data.get(CONF_USERNAME) == username
-                ]
-                for entry in account_entries:
-                    new_data = {**entry.data, CONF_REFRESH_TOKEN: refresh_token}
-                    new_data.pop(CONF_PASSWORD, None)
-                    self.hass.config_entries.async_update_entry(entry, data=new_data)
-                self._overtake_sign_ins_in_flight(username)
+                account_entries = self._move_account_onto_sign_in(
+                    username, refresh_token, besides=self._reauth_entry
+                )
+                if switched:
+                    _sync_kept_password(self.hass, old_username)
             # Home Assistant before 2025.5 leaves the entry's reauth dialog open
             # through the reload; submitted later, it would replace this sign-in.
             for flow in list(
@@ -941,13 +967,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     self.hass.config_entries.flow.async_abort(flow["flow_id"])
             # The reload below runs no setup for a disabled entry.
             _async_update_duplicate_entry_issues(self.hass)
-            # This sign-in proves the new token; crashes or err 4 refusals of the
-            # one it replaces must not count against it, and there is nothing left
-            # to sign in again (the reload sets nothing up for a disabled entry).
-            _clear_setup_refresh_refusals(self.hass, username)
-            _clear_sign_in_issues(self.hass, username)
-            for entry in (self._reauth_entry, *account_entries):
-                await self.hass.config_entries.async_reload(entry.entry_id)
+            await self._reload_onto_sign_in(
+                username, (self._reauth_entry, *account_entries)
+            )
         finally:
             # Also reached by an overtaken dialog, which took no hold; its key
             # is then on no session and nothing is released.
@@ -959,6 +981,58 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if self.source == config_entries.SOURCE_RECONFIGURE:
             return self.async_abort(reason="reconfigure_successful")
         return self.async_abort(reason="reauth_successful")
+
+    def _move_account_onto_sign_in(
+        self,
+        username: str,
+        refresh_token: str,
+        *,
+        besides: config_entries.ConfigEntry | None = None,
+    ) -> list[config_entries.ConfigEntry]:
+        """Save this dialog's sign-in on the account's entries other than
+        ``besides``, and return them to be reloaded onto it.
+
+        Called under the account lock, once this hub is the account's session.
+        """
+        account_entries = [
+            entry
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+            if entry is not besides and entry.data.get(CONF_USERNAME) == username
+        ]
+        for entry in account_entries:
+            new_data = {**entry.data, CONF_REFRESH_TOKEN: refresh_token}
+            # The password just proven replaces a kept one, which a
+            # password change would otherwise leave stale.
+            if new_data.get(CONF_KEEP_PASSWORD):
+                new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+            else:
+                new_data.pop(CONF_PASSWORD, None)
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+        for flow_id, config in setup_passwords(self.hass).items():
+            if flow_id != self.flow_id and config[CONF_USERNAME] == username:
+                config[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+        # Unticked, the user said no: the password just typed goes too.
+        _sync_kept_password(
+            self.hass,
+            username,
+            forget_unkept=not self.config.get(CONF_KEEP_PASSWORD),
+        )
+        self._overtake_sign_ins_in_flight(username)
+        return account_entries
+
+    async def _reload_onto_sign_in(
+        self, username: str, entries: Iterable[config_entries.ConfigEntry]
+    ) -> None:
+        """Reload ``entries`` onto the session this dialog just registered."""
+        # This sign-in proves the new token; refusals of the one it replaces
+        # must not count against it, nor failures to reach Verisure, and
+        # there is nothing left to sign in again (the reload sets nothing
+        # up for a disabled entry).
+        _clear_setup_refresh_refusals(self.hass, username)
+        _clear_setup_unreachable(self.hass, username)
+        _clear_sign_in_issues(self.hass, username)
+        for entry in entries:
+            await self.hass.config_entries.async_reload(entry.entry_id)
 
     def _sign_ins_in_flight(self) -> dict[FlowHandler, str]:
         """The sign-in-again dialogs running a step that can save, with the
@@ -976,8 +1050,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         before this save, for another of its installations, would replace the
         one just saved.
         """
-        assert self._reauth_entry is not None
-        entry_id = self._reauth_entry.entry_id
+        entry_id = self._reauth_entry.entry_id if self._reauth_entry else None
         for flow, flow_entry_id in self._sign_ins_in_flight().items():
             if flow is self:
                 continue
@@ -1018,7 +1091,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         assert self._reauth_entry is not None
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = username
-        new_data.pop(CONF_PASSWORD, None)
+        new_data[CONF_KEEP_PASSWORD] = bool(self.config.get(CONF_KEEP_PASSWORD))
+        if new_data[CONF_KEEP_PASSWORD]:
+            new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+        else:
+            new_data.pop(CONF_PASSWORD, None)
         new_data[CONF_REFRESH_TOKEN] = refresh_token
         unique_id: str | UndefinedType = UNDEFINED
         if installation and switched:
@@ -1303,22 +1380,35 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _sign_in_and_hold_session(self, username: str) -> None:
         """Sign in unless the account's session is already running, and hold it.
 
+        With a password to keep, the dialog signs in anyway, to check it, and
+        its sign-in replaces the running session.
+
         A dialog that might sign in from scratch does so under the account
         lock, which entry setup also takes, so an entry and this dialog never
         both sign in to the account: whichever comes second uses the session
         the first registered. A borrowed session is already held and signs in
         again without the lock, so an entry unloading meanwhile never waits on
         this dialog.
+
+        ``_track_setup_password`` runs as soon as the sign-in proves the
+        password, before anything else is awaited: a newer sign-in or a
+        rejection from then on must reach this dialog's copy.
         """
+        account_entries: list[config_entries.ConfigEntry] | None = None
         if self._owns_hub:
             async with _account_lock(self.hass, username):
                 sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
-                if (session := sessions.get(username)) is not None:
+                session = sessions.get(username)
+                if session is not None and self.config.get(CONF_KEEP_PASSWORD):
+                    account_entries = await self._sign_in_in_place_of(username, session)
+                    self._track_setup_password()
+                elif session is not None:
                     # An entry or another dialog signed in while this dialog
                     # waited for the lock or for a 2FA code.
                     self._borrow_session(username, session)
                 else:
                     await self._sign_in_if_needed()
+                    self._track_setup_password()
                     assert self.hub is not None
                     sessions[username] = _new_session_record(self.hub)
                     # The flow holds the session until it ends; an entry it
@@ -1326,7 +1416,36 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     # before removing the flow.
                     self._hold_flow_session(username, sessions[username])
                     return
+            if account_entries is not None:
+                await self._reload_onto_sign_in(username, account_entries)
+                return
         await self._sign_in_if_needed()
+        self._track_setup_password()
+
+    async def _sign_in_in_place_of(
+        self, username: str, session: dict[str, Any]
+    ) -> list[config_entries.ConfigEntry] | None:
+        """Sign in with the typed password and make this hub the account's
+        session in place of ``session``; return the entries to reload, or
+        None when the sign-in brought no refresh token and nothing changed.
+
+        Called under the account lock. Replaced here, not when the entry is
+        created: the new sign-in has already made the running session's token
+        useless, so the running entries move onto it even if the dialog is
+        then abandoned. A failed sign-in leaves ``session`` untouched.
+        """
+        if self._use_session_device_ids(session):
+            self._create_client()
+        await self._sign_in_if_needed()
+        assert self.hub is not None
+        refresh_token = self.hub.get_refresh_token()
+        # Creating the entry refuses a sign-in with no refresh token; the
+        # running entries must not be handed an empty one meanwhile.
+        if not refresh_token:
+            return None
+        registered = _replace_account_session(self.hass, username, self.hub)
+        self._hold_flow_session(username, registered)
+        return self._move_account_onto_sign_in(username, refresh_token)
 
     async def _sign_in_if_needed(self) -> None:
         assert self.hub is not None
@@ -1344,6 +1463,18 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_DEVICE_ID] = hub.config[CONF_DEVICE_ID]
         self.config[CONF_UNIQUE_ID] = hub.config[CONF_UNIQUE_ID]
         self.config[CONF_DEVICE_INDIGITALL] = hub.config.get(CONF_DEVICE_INDIGITALL, "")
+
+    def _use_session_device_ids(self, session: dict[str, Any]) -> bool:
+        """Sign in as the running session's device; True if that changed them."""
+        hub_config = session["hub"].config
+        ids = {
+            CONF_DEVICE_ID: hub_config[CONF_DEVICE_ID],
+            CONF_UNIQUE_ID: hub_config[CONF_UNIQUE_ID],
+            CONF_DEVICE_INDIGITALL: hub_config.get(CONF_DEVICE_INDIGITALL, ""),
+        }
+        changed = any(self.config.get(key) != value for key, value in ids.items())
+        self.config.update(ids)
+        return changed
 
     def _hold_flow_session(self, username: str, session: dict[str, Any]) -> None:
         """Hold ``session``, first releasing any other one this flow holds.
@@ -1368,6 +1499,22 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if current is not None and current["hub"] is not self.hub:
             self._borrow_session(self._held_account, current)
 
+    def _track_setup_password(self) -> None:
+        """Count a ticked dialog's proven password as one more stored copy of
+        the account's kept password until the dialog creates its entry.
+
+        The entry is created pages later. Meanwhile a newer sign-in to the
+        account replaces this copy as it does the entries' copies, and
+        Verisure rejecting the password removes it, so the entry never stores
+        a password the account has moved on from.
+        """
+        if self.config.get(CONF_KEEP_PASSWORD):
+            self.hass.data[DOMAIN].setdefault("setup_passwords", {})[self.flow_id] = (
+                self.config
+            )
+        else:
+            setup_passwords(self.hass).pop(self.flow_id, None)
+
     def _release_flow_session(self) -> None:
         """Release this flow's hold; the session goes once nobody holds it."""
         if self._held_account is None:
@@ -1389,6 +1536,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         dialog counts as one. A reauth dialog does not count; its entry keeps
         the integration set up while it waits.
         """
+        setup_passwords(self.hass).pop(self.flow_id, None)
         self._release_flow_session()
         self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
 
@@ -1407,6 +1555,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self) -> None:
         """Initialize options flow."""
         self._general_data: dict[str, Any] = {}
+        self._forget_password = False
 
     def _get(self, key: str, default: Any = None) -> Any:
         """Read current value from options, falling back to entry data."""
@@ -1420,6 +1569,8 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         """Step 1: General settings."""
         if user_input is not None:
             user_input = _flatten_sections(user_input)
+            # The box lives in entry data, not options.
+            self._forget_password = user_input.pop(CONF_KEEP_PASSWORD, True) is False
             raw_code = user_input.pop(CONF_CODE, DEFAULT_CODE)
             code_hash, code_is_numeric = _resolve_code_submission(
                 raw_code,
@@ -1479,8 +1630,25 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             notify_options,
             use_suggested=True,
             extra_fields=extra_fields,
+            # Turning it on needs Reconfigure, where the password is typed.
+            keep_password_default=(
+                True if self.config_entry.data.get(CONF_KEEP_PASSWORD) else None
+            ),
         )
         return self.async_show_form(step_id="init", data_schema=schema)
+
+    def _save(self, data: dict[str, Any]) -> config_entries.ConfigFlowResult:
+        """Save the options and, if the box was unticked, forget the kept
+        password without signing in."""
+        if self._forget_password:
+            entry = self.config_entry
+            new_data = {**entry.data, CONF_KEEP_PASSWORD: False}
+            new_data.pop(CONF_PASSWORD, None)
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+            _sync_kept_password(
+                self.hass, entry.data[CONF_USERNAME], forget_unkept=True
+            )
+        return self.async_create_entry(title="", data=data)
 
     async def async_step_mappings(
         self, user_input: dict[str, Any] | None = None
@@ -1574,7 +1742,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         """
         registered_locks = await self._get_registered_locks()
         if not registered_locks:
-            return self.async_create_entry(title="", data=self._general_data)
+            return self._save(self._general_data)
 
         enabled_circuits = self._get_enabled_circuits()
         # Preserve LOCK_CIRCUITS ordering so the UI is consistent.
@@ -1597,10 +1765,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                         if section_data.get(f"unlock_disarms__{c}", False)
                     ],
                 }
-            return self.async_create_entry(
-                title="",
-                data={**self._general_data, CONF_LOCK_AUTOMATIONS: new_map},
-            )
+            return self._save({**self._general_data, CONF_LOCK_AUTOMATIONS: new_map})
 
         existing = self.config_entry.options.get(CONF_LOCK_AUTOMATIONS, {})
 

@@ -25,7 +25,11 @@
                 "description": "Votre session a expiré. Veuillez saisir à nouveau votre mot de passe pour vous reconnecter.",
                 "data": {
                     "username": "Nom d'utilisateur",
-                    "password": "Mot de passe"
+                    "password": "Mot de passe",
+                    "keep_password": "Conserver mon mot de passe pour que l'intégration puisse se reconnecter d'elle-même"
+                },
+                "data_description": {
+                    "keep_password": "Si cette case est cochée, votre mot de passe est enregistré sans chiffrement dans les fichiers de configuration de Home Assistant, où toute personne pouvant lire ces fichiers ou une sauvegarde de ceux-ci peut le lire. Laissez-la décochée pour ne conserver que la connexion enregistrée, qui n'est pas votre mot de passe et ne sert donc à rien ailleurs où vous utilisez ce mot de passe."
                 }
             },
             "reconfigure": {
@@ -33,14 +37,22 @@
                 "description": "Saisissez votre mot de passe Verisure pour obtenir une nouvelle connexion. Utilisez cette option lorsque l'intégration ne parvient pas à se connecter et ne vous a pas demandé de vous reconnecter.",
                 "data": {
                     "username": "Nom d'utilisateur",
-                    "password": "Mot de passe"
+                    "password": "Mot de passe",
+                    "keep_password": "Conserver mon mot de passe pour que l'intégration puisse se reconnecter d'elle-même"
+                },
+                "data_description": {
+                    "keep_password": "Si cette case est cochée, votre mot de passe est enregistré sans chiffrement dans les fichiers de configuration de Home Assistant, où toute personne pouvant lire ces fichiers ou une sauvegarde de ceux-ci peut le lire. Laissez-la décochée pour ne conserver que la connexion enregistrée, qui n'est pas votre mot de passe et ne sert donc à rien ailleurs où vous utilisez ce mot de passe."
                 }
             },
             "user": {
                 "data": {
                     "country": "Code pays",
                     "username": "Nom d'utilisateur",
-                    "password": "Mot de passe"
+                    "password": "Mot de passe",
+                    "keep_password": "Conserver mon mot de passe pour que l'intégration puisse se reconnecter d'elle-même"
+                },
+                "data_description": {
+                    "keep_password": "Si cette case est cochée, votre mot de passe est enregistré sans chiffrement dans les fichiers de configuration de Home Assistant, où toute personne pouvant lire ces fichiers ou une sauvegarde de ceux-ci peut le lire. Laissez-la décochée pour ne conserver que la connexion enregistrée, qui n'est pas votre mot de passe et ne sert donc à rien ailleurs où vous utilisez ce mot de passe."
                 },
                 "description": "Connexion à Verisure.",
                 "title": "Connexion"
@@ -134,6 +146,16 @@
                         "name": "Journal d'activité et événements",
                         "data": {
                             "enable_activity_polling": "Interroger le journal d'activité une fois par minute en arrière-plan (pour les automatisations par événements)"
+                        }
+                    },
+                    "sign_in": {
+                        "name": "Connexion",
+                        "description": "Avec cette case cochée, l'intégration conserve votre mot de passe dans les fichiers de configuration de Home Assistant pour pouvoir se reconnecter d'elle-même. Si Verisure a rejeté le mot de passe conservé, il a déjà été supprimé : reconnectez-vous avec Reconfigurer pour en conserver un nouveau.",
+                        "data": {
+                            "keep_password": "Conserver mon mot de passe pour que l'intégration puisse se reconnecter d'elle-même"
+                        },
+                        "data_description": {
+                            "keep_password": "Décochez la case et enregistrez pour supprimer immédiatement le mot de passe conservé, sans vous connecter. Pour conserver à nouveau votre mot de passe, utilisez Reconfigurer, où vous le saisissez."
                         }
                     },
                     "advanced": {
@@ -299,6 +321,10 @@
         "renewal_refused": {
             "title": "Verisure refuse toujours la connexion enregistrée",
             "description": "Depuis au moins 15 minutes, Verisure refuse de renouveler la connexion enregistrée pour {username} ; Home Assistant ne peut donc plus joindre votre alarme. C'est souvent un problème passager chez Verisure : l'intégration réessaie toutes les quelques minutes et se rétablit d'elle-même dès que Verisure l'accepte à nouveau. Sinon, reconnectez-vous : ouvrez Paramètres → Appareils et services → Verisure OWA, ouvrez le menu (⋮) de l'entrée et choisissez Reconfigurer. Cette notification disparaît dès qu'un renouvellement ou une connexion réussit."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant ne parvient pas à joindre Verisure",
+            "description": "Depuis au moins une heure, aucune requête de Home Assistant vers Verisure pour {username} n'a abouti. L'intégration réessaie toutes les quelques minutes et se rétablit d'elle-même dès que Verisure répond à nouveau. Vérifiez que l'application Verisure fonctionne et que Home Assistant est connecté à Internet. Si l'application Verisure fonctionne et que cette notification persiste, signalez-le avec le journal sur {url}. Cette notification disparaît dès qu'une requête vers Verisure aboutit."
         }
     },
     "entity": {

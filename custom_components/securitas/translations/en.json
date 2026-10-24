@@ -25,7 +25,11 @@
                 "description": "Your session has expired. Please re-enter your password to reconnect.",
                 "data": {
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "keep_password": "Keep my password so the integration can sign in again by itself"
+                },
+                "data_description": {
+                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which is not your password and so is no use anywhere else you use that password."
                 }
             },
             "reconfigure": {
@@ -33,14 +37,22 @@
                 "description": "Enter your Verisure password to get a new login. Use this when the integration can't connect and hasn't asked you to sign in again.",
                 "data": {
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "keep_password": "Keep my password so the integration can sign in again by itself"
+                },
+                "data_description": {
+                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which is not your password and so is no use anywhere else you use that password."
                 }
             },
             "user": {
                 "data": {
                     "country": "Country",
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "keep_password": "Keep my password so the integration can sign in again by itself"
+                },
+                "data_description": {
+                    "keep_password": "If ticked, your password is stored unencrypted in Home Assistant's configuration files, where anyone who can read those files or a backup of them can read it. Leave it unticked to keep only the saved sign-in, which is not your password and so is no use anywhere else you use that password."
                 },
                 "description": "Login into Verisure.",
                 "title": "Login"
@@ -161,6 +173,16 @@
                         "name": "Activity Log and Events",
                         "data": {
                             "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations)"
+                        }
+                    },
+                    "sign_in": {
+                        "name": "Sign-in",
+                        "description": "With this ticked, the integration keeps your password in Home Assistant's configuration files so it can sign in again by itself. If Verisure rejected the kept password, it has already been removed: sign in again with Reconfigure to keep a new one.",
+                        "data": {
+                            "keep_password": "Keep my password so the integration can sign in again by itself"
+                        },
+                        "data_description": {
+                            "keep_password": "Untick and save to delete the stored password at once, without signing in. To keep your password again, use Reconfigure, where you type it."
                         }
                     },
                     "advanced": {
@@ -299,6 +321,10 @@
         "renewal_refused": {
             "title": "Verisure keeps refusing the saved sign-in",
             "description": "For at least 15 minutes Verisure has refused to renew the saved sign-in for {username}, so Home Assistant can't reach your alarm. This is often a temporary problem at Verisure: the integration keeps trying every few minutes and recovers by itself if Verisure accepts it again. If it doesn't, sign in again: open Settings → Devices & services → Verisure OWA, open the menu (⋮) on the entry and choose Reconfigure. This notice clears once a renewal or sign-in succeeds."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant can't reach Verisure",
+            "description": "For at least an hour, no request from Home Assistant to Verisure for {username} has worked. The integration keeps trying every few minutes and recovers by itself once Verisure answers again. Check that the Verisure app works and that Home Assistant is online. If the Verisure app works and this notice stays, please report it with the log at {url}. This notice clears once a request to Verisure works."
         }
     },
     "entity": {

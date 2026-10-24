@@ -105,6 +105,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENTRY_ID,
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
+    CONF_KEEP_PASSWORD,
     CONF_LOCK_AUTOMATIONS,
     CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
@@ -155,6 +156,7 @@ from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     _RENEWAL_REFUSED_ISSUE,
     _SIGN_IN_ISSUE,
+    _UNREACHABLE_ISSUE,
     VerisureDevice,
     VerisureHub,
     _async_notify,
@@ -162,8 +164,11 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     _notify,
     _renewal_refused_issue_id,
     _sign_in_issue_id,
+    _unreachable_issue_id,
     clear_renewal_refused_issue,
+    clear_unreachable_issue,
     raise_renewal_refused_issue,
+    raise_unreachable_issue,
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
@@ -178,7 +183,10 @@ from .verisure_owa_api import (
     VerisureOwaError,
     generate_uuid,
 )
-from .verisure_owa_api.client._base import REFRESH_REFUSAL_ALERT_AFTER
+from .verisure_owa_api.client._base import (
+    REFRESH_REFUSAL_ALERT_AFTER,
+    UNREACHABLE_ALERT_AFTER,
+)
 from .verisure_owa_api.exceptions import dead_refresh_token_signal
 
 _LOGGER = logging.getLogger(__name__)
@@ -492,16 +500,17 @@ def _raise_sign_in_issue(
         translation_key="account_blocked" if blocked else "sign_in_again",
         translation_placeholders={"username": username},
     )
+    clear_unreachable_issue(hass, username)
 
 
 @callback
 def _clear_sign_in_issues(
     hass: HomeAssistant, username: str | None, removing: ConfigEntry | None = None
 ) -> None:
-    """Clear ``username``'s sign-in and renewal-refused issues, and those of
-    accounts no entry uses any more: signing an entry in again as another
-    account, or deleting an account's last entry, leaves nothing to sign in
-    again there.
+    """Clear ``username``'s sign-in, renewal-refused and unreachable issues,
+    and those of accounts no entry uses any more: signing an entry in again as
+    another account, or deleting an account's last entry, leaves nothing to
+    sign in again there.
 
     ``removing`` is the entry being deleted, which no longer counts.
     """
@@ -509,7 +518,9 @@ def _clear_sign_in_issues(
         issue_id
         for domain, issue_id in ir.async_get(hass).issues
         if domain == DOMAIN
-        and issue_id.startswith((_SIGN_IN_ISSUE, _RENEWAL_REFUSED_ISSUE))
+        and issue_id.startswith(
+            (_SIGN_IN_ISSUE, _RENEWAL_REFUSED_ISSUE, _UNREACHABLE_ISSUE)
+        )
     ]
     if not raised:
         return
@@ -520,9 +531,11 @@ def _clear_sign_in_issues(
         if entry_username := entry.data.get(CONF_USERNAME):
             in_use.add(_sign_in_issue_id(entry_username))
             in_use.add(_renewal_refused_issue_id(entry_username))
+            in_use.add(_unreachable_issue_id(entry_username))
     if username is not None:
         in_use.discard(_sign_in_issue_id(username))
         in_use.discard(_renewal_refused_issue_id(username))
+        in_use.discard(_unreachable_issue_id(username))
     for issue_id in raised:
         if issue_id not in in_use:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
@@ -581,6 +594,7 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data.get(CONF_PASSWORD, "")
+    config[CONF_KEEP_PASSWORD] = entry.data.get(CONF_KEEP_PASSWORD, False)
     config[CONF_REFRESH_TOKEN] = entry.data.get(CONF_REFRESH_TOKEN, "")
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
     config[CONF_CODE_HASH] = _opt(CONF_CODE_HASH, None)
@@ -677,21 +691,52 @@ def _clear_setup_refresh_refusals(hass: HomeAssistant, username: str) -> None:
     hass.data.get(DOMAIN, {}).get("refresh_refusals", {}).pop(username, None)
 
 
+def _note_setup_unreachable(hass: HomeAssistant, username: str) -> None:
+    """Track a setup that could not reach Verisure; raise the "can't reach
+    Verisure" notice once failures have lasted UNREACHABLE_ALERT_AFTER.
+
+    Kept in hass.data per account for the same reasons as
+    ``refresh_refusals``.
+    """
+    periods = hass.data[DOMAIN].setdefault("unreachable", {})
+    now = datetime.now(UTC)
+    period = periods.setdefault(username, {"since": now, "alerted": False})
+    if period["alerted"] or now - period["since"] < UNREACHABLE_ALERT_AFTER:
+        return
+    period["alerted"] = True
+    raise_unreachable_issue(hass, username)
+    _LOGGER.warning(
+        "No request to Verisure has worked for %d minutes. The integration "
+        "keeps trying; check that the Verisure app works and that Home "
+        "Assistant is online.",
+        int((now - period["since"]).total_seconds() // 60),
+    )
+
+
+def _clear_setup_unreachable(hass: HomeAssistant, username: str) -> None:
+    """Forget the account's setup-time failures to reach Verisure once setup
+    hands back a session or the reauth or Reconfigure dialog signs in."""
+    hass.data.get(DOMAIN, {}).get("unreachable", {}).pop(username, None)
+
+
 @callback
 def _drop_unused_setup_refresh_refusals(
     hass: HomeAssistant, removing: ConfigEntry
 ) -> None:
-    """Forget setup-time refusals of accounts no entry but ``removing`` uses."""
-    refusals = hass.data.get(DOMAIN, {}).get("refresh_refusals")
-    if not refusals:
-        return
+    """Forget setup-time refusals and failures to reach Verisure of accounts
+    no entry but ``removing`` uses."""
     in_use = {
         entry.data.get(CONF_USERNAME)
         for entry in hass.config_entries.async_entries(DOMAIN)
         if entry.entry_id != removing.entry_id
     }
-    for username in set(refusals) - in_use:
-        del refusals[username]
+    domain_data = hass.data.get(DOMAIN, {})
+    for key in ("refresh_refusals", "unreachable"):
+        tracked = domain_data.get(key)
+        if not tracked:
+            continue
+        for username in set(tracked) - in_use:
+            del tracked[username]
 
 
 async def _login_or_raise(
@@ -750,8 +795,14 @@ async def _login_or_raise(
             "Unable to connect to Verisure: %s",
             err.log_detail(),
         )
-        if dead_refresh_token_signal(err) is not None:
+        # A refusal answered by a kept-password sign-in that then failed is
+        # still a refusal.
+        if (
+            dead_refresh_token_signal(err) is not None
+            or client.last_login_refusal is not None
+        ):
             _note_setup_refresh_refusal(hass, username)
+        _note_setup_unreachable(hass, username)
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"
         ) from None
@@ -896,9 +947,12 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
     one ``entry`` stored, unless ``entry`` is signed in to another account. A
     token Verisure keeps refusing is not written: it would replace the entry's
     own token, which setup may still be able to use. Its notice is raised
-    instead, since the client raises it only once and a detached hub drops it.
+    instead, since the client raises it only once and a detached hub drops it;
+    so is the "can't reach Verisure" notice, for the same reason.
     """
     hub.config_entry = entry
+    if hub.unreachable_alert_raised:
+        hub.raise_unreachable_notice()
     if hub.refresh_refusals_persisting:
         hub.raise_refusal_notice()
     else:
@@ -938,6 +992,7 @@ def _replace_account_session(
     registered = _new_session_record(hub)
     if (retired := sessions.get(username)) is not None:
         retired["hub"].config_entry = None
+        retired["hub"].replaced = True
         flow_holds = {
             holder
             for holder in retired["holders"]
@@ -980,6 +1035,72 @@ async def _sign_in_with_adopted_token(
         raise
 
 
+def _password_secret_key(username: str) -> str:
+    """The log filter's key for an account's password: one per account, so
+    registering one account's password never unregisters another's."""
+    return f"password:{_hashed_issue_id('', username)}"
+
+
+def _account_kept_password(
+    hass: HomeAssistant, username: str, *, removing: ConfigEntry | None = None
+) -> str | None:
+    """The password kept by one of the account's enabled entries, other than
+    ``removing``, that has the box ticked; None when none keeps one."""
+    return next(
+        (
+            entry.data[CONF_PASSWORD]
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry is not removing
+            and entry.disabled_by is None
+            and entry.data.get(CONF_USERNAME) == username
+            and entry.data.get(CONF_KEEP_PASSWORD)
+            and entry.data.get(CONF_PASSWORD)
+        ),
+        None,
+    )
+
+
+def _register_kept_password(hass: HomeAssistant, username: str, kept: str) -> None:
+    """Hide the account's kept password from the log."""
+    log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get("log_filter")
+    if log_filter is not None:
+        log_filter.update_secret(
+            _password_secret_key(username), kept, label="[PASSWORD]"
+        )
+
+
+def _sync_kept_password(
+    hass: HomeAssistant,
+    username: str,
+    *,
+    removing: ConfigEntry | None = None,
+    forget_unkept: bool = False,
+) -> None:
+    """Give the account's shared client a kept password while one of the
+    account's enabled entries, other than ``removing``, has the box ticked.
+
+    Otherwise a kept password is dropped, and so is a password held only in
+    memory when ``forget_unkept`` is set (the user just said no); without it,
+    an in-memory password is left for the client's usual fallback.
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    session = domain_data.get("sessions", {}).get(username)
+    if session is None:
+        return
+    client = session["hub"].client
+    log_filter: SensitiveDataFilter | None = domain_data.get("log_filter")
+    kept = _account_kept_password(hass, username, removing=removing)
+    if kept is not None:
+        client.password = kept
+        client.password_kept = True
+        _register_kept_password(hass, username, kept)
+    elif client.password_kept or forget_unkept:
+        client.password = ""
+        client.password_kept = False
+        if log_filter is not None:
+            log_filter.update_secret(_password_secret_key(username), None)
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -1013,6 +1134,8 @@ async def _get_or_create_session(
             # the meantime would otherwise unregister it as held by nobody.
             _take_session_hold(session, entry.entry_id)
             client: VerisureHub = session["hub"]
+            # Before the adoption below, which may need this entry's password.
+            _sync_kept_password(hass, username)
             # The config-flow hub is built before the ConfigEntry exists, so it
             # starts detached (config_entry=None) and is registered in
             # ``sessions`` by the flow. When HA then sets up the freshly-created
@@ -1035,18 +1158,38 @@ async def _get_or_create_session(
                         )
                         signed_in = True
         else:
+            # Read again under the lock: an entry that signed in meanwhile may
+            # have had the kept password rejected and removed.
+            config = {
+                **config,
+                CONF_PASSWORD: entry.data.get(CONF_PASSWORD, ""),
+                CONF_KEEP_PASSWORD: entry.data.get(CONF_KEEP_PASSWORD, False),
+            }
+            # An unticked entry setting up first signs in for the whole
+            # account, so it uses a ticked sibling's password. The hub keeps it
+            # only in memory: it never writes a password to its entry.
+            if (kept := _account_kept_password(hass, username)) is not None:
+                _register_kept_password(hass, username, kept)
+                config[CONF_PASSWORD] = kept
+                config[CONF_KEEP_PASSWORD] = True
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
             _take_session_hold(sessions[username], entry.entry_id)
+            _sync_kept_password(hass, username)
             signed_in = True
 
     # Any session handed back ends the setup refusal period, even a reused one
     # nobody signed in to here; refusals from here on are tracked by the
     # client's renewals instead.
     _clear_setup_refresh_refusals(hass, username)
+    _clear_setup_unreachable(hass, username)
     # A raised alert outlives an adoption; the client clears it on success.
     if not (client.refresh_refusals_persisting or client.refresh_refusal_alert_raised):
         clear_renewal_refused_issue(hass, username)
+    # A reused session made no request here, so proves nothing while its
+    # client still cannot reach Verisure.
+    if signed_in or not client.unreachable_alert_raised:
+        clear_unreachable_issue(hass, username)
     # Only a sign-in made here shows the account can sign in now; a reused
     # session's token may be one Verisure has just refused.
     if signed_in:
@@ -1639,7 +1782,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     log_filter.update_secret("username", config[CONF_USERNAME])
     if config.get(CONF_PASSWORD):
-        log_filter.update_secret("password", config[CONF_PASSWORD])
+        # One key per account: a shared key would unregister the previous
+        # account's password.
+        log_filter.update_secret(
+            _password_secret_key(config[CONF_USERNAME]),
+            config[CONF_PASSWORD],
+            label="[PASSWORD]",
+        )
 
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:
@@ -2050,6 +2199,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
+    # By the account, not the hold: unloading has usually released it already.
+    _sync_kept_password(hass, entry.data.get(CONF_USERNAME, ""), removing=entry)
     sessions = domain_data.get("sessions", {})
     username = _held_session_username(sessions, entry)
     if username is not None:
@@ -2065,6 +2216,13 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     """Unload a config entry."""
     if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
         return False
+
+    # A plain unload (a reload, or Home Assistant stopping) keeps the entry's
+    # kept password in use; disabling it stops it.
+    if config_entry.disabled_by:
+        _sync_kept_password(
+            hass, config_entry.data.get(CONF_USERNAME, ""), removing=config_entry
+        )
 
     # Release this entry's hold (under the same lock used for creation)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})

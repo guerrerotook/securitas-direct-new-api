@@ -17,6 +17,7 @@ from custom_components.securitas.verisure_owa_api.client import (
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
+    APIConnectionError,
     AuthenticationError,
     SessionExpiredError,
     TwoFactorRequiredError,
@@ -28,10 +29,16 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 from .conftest import (
     FAKE_JWT,
     FAKE_REFRESH_TOKEN,
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
+    login_rejected_error,
     login_response,
     make_jwt,
     refresh_login_crash_error,
     refresh_response,
+    refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
     refresh_token_rejected_error,
     validate_device_response,
 )
@@ -78,6 +85,42 @@ class TestLogin:
         mock_execute.return_value = {
             "errors": [{"message": "Invalid credentials"}],
         }
+
+        with pytest.raises(AuthenticationError):
+            await api.login()
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    @pytest.mark.parametrize("raised", [False, True], ids=["reply", "raised"])
+    async def test_server_fault_reply_is_not_a_credential_error(
+        self, api, mock_execute, fault, raised
+    ):
+        """Verisure's timeout, a 5xx status or its resolver crash says
+        nothing about the password: a plain error that keeps the reply."""
+        body = login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        if raised:
+            transport_err = VerisureOwaError("bad reply", http_status=500)
+            transport_err.response_body = body
+            mock_execute.side_effect = transport_err
+        else:
+            mock_execute.return_value = body
+
+        with pytest.raises(VerisureOwaError) as caught:
+            await api.login()
+
+        assert not isinstance(caught.value, AuthenticationError)
+        assert caught.value.response_body == body
+
+    @pytest.mark.parametrize("raised", [False, True], ids=["reply", "raised"])
+    async def test_wrong_password_reply_raises_authentication_error(
+        self, api, mock_execute, raised
+    ):
+        body = login_error_reply(LOGIN_WRONG_PASSWORD)
+        if raised:
+            transport_err = VerisureOwaError("bad reply", http_status=401)
+            transport_err.response_body = body
+            mock_execute.side_effect = transport_err
+        else:
+            mock_execute.return_value = body
 
         with pytest.raises(AuthenticationError):
             await api.login()
@@ -681,8 +724,13 @@ def clock(monkeypatch):
 
 REFUSALS = pytest.mark.parametrize(
     "make_refusal",
-    [refresh_token_rejected_error, refresh_login_crash_error],
-    ids=["err4", "crash"],
+    [
+        refresh_token_rejected_error,
+        refresh_token_rejected_err7_error,
+        refresh_token_rejected_err99_error,
+        refresh_login_crash_error,
+    ],
+    ids=["err4", "err7", "err99", "crash"],
 )
 
 
@@ -747,7 +795,8 @@ def _fresh(make_refusal):
 
 
 class TestRefusalsKeepRetrying:
-    """A refusal (err 4 or the #568 crash) is never Verisure saying the token is
+    """A refusal (any error Verisure answers on xSRefreshLogin, such as err 4,
+    err 7 or the #568 crash) is never Verisure saying the token is
     invalid, so the token is never condemned: every refusal is a transient
     failure the coordinators retry. After 15 minutes of them the host is told
     once, and renewals slow to one every 5 minutes."""
@@ -885,10 +934,17 @@ class TestRefusalsKeepRetrying:
     async def test_refusals_and_crashes_share_one_period(self, mock_transport, clock):
         alerts = MagicMock()
         client = _token_only_client(mock_transport, on_refresh_refusal_alert=alerts)
-        refusals = [refresh_token_rejected_error, refresh_login_crash_error]
+        refusals = [
+            refresh_token_rejected_error,
+            refresh_token_rejected_err7_error,
+            refresh_token_rejected_err99_error,
+            refresh_login_crash_error,
+        ]
 
         for minute in range(16):
-            client.refresh_token = AsyncMock(side_effect=refusals[minute % 2]())
+            client.refresh_token = AsyncMock(
+                side_effect=refusals[minute % len(refusals)]()
+            )
             await _poll(client)
             clock.advance(minutes=1)
 
@@ -930,8 +986,8 @@ class TestRefusalsKeepRetrying:
     async def test_a_stored_password_is_used_once_persisting(
         self, mock_transport, clock, make_refusal
     ):
-        """A stored password is the stronger credential: once refusals persist,
-        use it rather than keep presenting the refused token."""
+        """A password held only in memory is the stronger credential: once
+        refusals persist, use it rather than keep presenting the refused token."""
         client = _token_only_client(mock_transport, password="secret")
         client.refresh_token = AsyncMock(side_effect=_fresh(make_refusal))
 
@@ -1162,6 +1218,259 @@ class TestRefusalsKeepRetrying:
         assert await _race(client) == [None, None]
         assert client.refresh_token.await_count == 1
         assert client.refresh_refusals_persisting is False
+
+
+def _genuine_code_rejection() -> VerisureOwaError:
+    err = VerisureOwaError("Invalid session")
+    err.response_body = {"errors": [{"data": {"err": "60067"}}]}
+    return err
+
+
+_SIGN_IN_REJECTIONS = [
+    pytest.param(login_rejected_error, id="wrong-password"),
+    pytest.param(lambda: AccountBlockedError("blocked"), id="blocked"),
+    pytest.param(lambda: TwoFactorRequiredError("sms code"), id="sms-code"),
+    pytest.param(_genuine_code_rejection, id="err-60067"),
+]
+
+
+class TestKeptPassword:
+    """A password the user chose to keep is spent at the first refusal; one
+    held only in memory waits until refusals persist."""
+
+    @REFUSALS
+    async def test_kept_password_signs_in_at_the_first_refusal(
+        self, mock_transport, clock, make_refusal
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_refresh_refusal_alert=alerts,
+        )
+        client.refresh_token = AsyncMock(side_effect=make_refusal())
+
+        assert await _poll(client) is None
+
+        client.login.assert_awaited_once()
+        alerts.assert_not_called()
+
+    async def test_crash_with_a_server_status_does_not_spend_the_kept_password(
+        self, mock_transport, clock
+    ):
+        crash = refresh_login_crash_error()
+        crash.response_body["errors"][0]["data"]["status"] = 503
+        client = _token_only_client(
+            mock_transport, password="secret", password_kept=True
+        )
+        client.refresh_token = AsyncMock(side_effect=crash)
+
+        assert await _poll(client) is crash
+
+        client.login.assert_not_called()
+
+    async def test_kept_password_login_failing_transiently_keeps_the_refusal_period(
+        self, mock_transport, clock
+    ):
+        alerts = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_refresh_refusal_alert=alerts,
+        )
+        del client.login  # the real login, failing at the transport
+        operations: list[str] = []
+
+        async def execute(content, headers, **kwargs):
+            operations.append(content["operationName"])
+            if content["operationName"] == "RefreshLogin":
+                raise refresh_token_rejected_error()
+            assert content["operationName"] == "mkLoginToken"
+            raise APIConnectionError("connection reset")
+
+        mock_transport.execute.side_effect = execute
+
+        assert isinstance(await _poll(client), APIConnectionError)
+        assert operations == ["RefreshLogin", "mkLoginToken"]
+
+        clock.advance(minutes=1)
+        err = await _poll(client)
+        assert "still refusing" in str(err)
+        assert operations == ["RefreshLogin", "mkLoginToken"]
+
+        for _ in range(14):
+            clock.advance(minutes=1)
+            await _poll(client)
+        alerts.assert_called_once_with(True)
+
+    @pytest.mark.parametrize("make_rejection", _SIGN_IN_REJECTIONS)
+    async def test_rejected_kept_password_is_not_tried_again(
+        self, mock_transport, clock, make_rejection
+    ):
+        """Verisure blocks an account after three failed sign-ins, so a kept
+        password it rejects is dropped: the coordinators sharing the client
+        do not each spend one more attempt."""
+        client = _token_only_client(
+            mock_transport, password="secret", password_kept=True
+        )
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        rejection = make_rejection()
+        client.login = AsyncMock(side_effect=rejection)
+
+        assert await _poll(client) is rejection
+        assert client.password == ""
+        assert client.password_kept is False
+
+        for _ in range(3):
+            clock.advance(minutes=5)
+            results = await _race(client)
+            assert all(isinstance(r, VerisureOwaError) for r in results)
+        client.login.assert_awaited_once()
+
+    @pytest.mark.parametrize("fault", list(LOGIN_SERVER_FAULTS))
+    async def test_server_fault_at_kept_password_sign_in_is_passing(
+        self, mock_transport, clock, fault
+    ):
+        """A server fault answering the kept-password sign-in is a passing
+        fault, not a verdict: no reauth, the password stays, and the refusal
+        period carries on to its 15-minute notice."""
+        rejected = MagicMock()
+        alerts = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_kept_password_rejected=rejected,
+            on_refresh_refusal_alert=alerts,
+        )
+        del client.login  # the real login
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        mock_transport.execute.return_value = login_error_reply(
+            LOGIN_SERVER_FAULTS[fault]
+        )
+
+        err = await _poll(client)
+
+        assert isinstance(err, VerisureOwaError)
+        assert not isinstance(err, AuthenticationError)
+        assert not is_genuine_auth_failure(err)
+        assert err.response_body == login_error_reply(LOGIN_SERVER_FAULTS[fault])
+        assert client.password == "secret"
+        assert client.password_kept is True
+        rejected.assert_not_called()
+        for _ in range(15):
+            clock.advance(minutes=1)
+            await _poll(client)
+        alerts.assert_called_once_with(True)
+
+    async def test_kept_password_rejected_by_verisure_reply_is_dropped(
+        self, mock_transport, clock
+    ):
+        rejected = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="secret",
+            password_kept=True,
+            on_kept_password_rejected=rejected,
+        )
+        del client.login
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        mock_transport.execute.return_value = login_error_reply(LOGIN_WRONG_PASSWORD)
+
+        assert isinstance(await _poll(client), AuthenticationError)
+
+        assert client.password == ""
+        rejected.assert_called_once_with("secret")
+
+    async def test_password_swapped_in_during_a_rejected_sign_in_is_kept(
+        self, mock_transport, clock
+    ):
+        """The rejection is of the password that was sent: one put in place
+        while the sign-in was waiting for its answer stays, in the client and
+        in storage."""
+        rejected = MagicMock()
+        client = _token_only_client(
+            mock_transport,
+            password="old-password",
+            password_kept=True,
+            on_kept_password_rejected=rejected,
+        )
+        del client.login
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        sent: list[str] = []
+        in_flight = asyncio.Event()
+        answer = asyncio.Event()
+
+        async def execute(content, headers, **kwargs):
+            sent.append(content["variables"]["password"])
+            in_flight.set()
+            await answer.wait()
+            return login_error_reply(LOGIN_WRONG_PASSWORD)
+
+        mock_transport.execute.side_effect = execute
+        poll = asyncio.create_task(_poll(client))
+        await asyncio.wait_for(in_flight.wait(), 2)
+        client.password = "new-password"
+        answer.set()
+
+        assert isinstance(await poll, AuthenticationError)
+        assert sent == ["old-password"]
+        rejected.assert_called_once_with("old-password")
+        assert client.password == "new-password"
+        assert client.password_kept is True
+
+    async def test_kept_password_failing_transiently_is_kept(
+        self, mock_transport, clock
+    ):
+        client = _token_only_client(
+            mock_transport, password="secret", password_kept=True
+        )
+        client.refresh_token = AsyncMock(
+            side_effect=_fresh(refresh_token_rejected_error)
+        )
+        client.login = AsyncMock(side_effect=APIConnectionError("connection reset"))
+
+        assert isinstance(await _poll(client), APIConnectionError)
+        assert client.password == "secret"
+        assert client.password_kept is True
+
+    async def test_rejected_in_memory_password_is_not_tried_again(
+        self, mock_transport, clock
+    ):
+        """A password held only in memory shares the fallback, and so the rule."""
+        client = _token_only_client(mock_transport, password="secret")
+        await _refuse_until_persisting(client, clock, refresh_token_rejected_error)
+        client.login = AsyncMock(side_effect=login_rejected_error())
+        clock.advance(minutes=5)
+
+        assert isinstance(await _poll(client), AuthenticationError)
+        assert client.password == ""
+
+        for _ in range(3):
+            clock.advance(minutes=5)
+            await _poll(client)
+        client.login.assert_awaited_once()
+
+    @REFUSALS
+    async def test_in_memory_password_waits_for_persisting_refusals(
+        self, mock_transport, clock, make_refusal
+    ):
+        client = _token_only_client(mock_transport, password="secret")
+        client.refresh_token = AsyncMock(side_effect=make_refusal())
+
+        assert isinstance(await _poll(client), VerisureOwaError)
+
+        client.login.assert_not_called()
 
 
 def _yielding(effect):

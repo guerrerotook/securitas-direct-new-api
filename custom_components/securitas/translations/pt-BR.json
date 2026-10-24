@@ -25,7 +25,11 @@
                 "description": "Sua sessão expirou. Digite novamente sua senha para reconectar.",
                 "data": {
                     "username": "Nome de usuário",
-                    "password": "Senha"
+                    "password": "Senha",
+                    "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
+                },
+                "data_description": {
+                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que não é a sua senha e, portanto, não serve para nada em outros lugares onde você usa essa senha."
                 }
             },
             "reconfigure": {
@@ -33,14 +37,22 @@
                 "description": "Digite sua senha da Verisure para obter um novo login. Use esta opção quando a integração não conseguir se conectar e não tiver pedido para você entrar novamente.",
                 "data": {
                     "username": "Nome de usuário",
-                    "password": "Senha"
+                    "password": "Senha",
+                    "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
+                },
+                "data_description": {
+                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que não é a sua senha e, portanto, não serve para nada em outros lugares onde você usa essa senha."
                 }
             },
             "user": {
                 "data": {
                     "country": "Código do país",
                     "username": "Nome de usuário",
-                    "password": "Senha"
+                    "password": "Senha",
+                    "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
+                },
+                "data_description": {
+                    "keep_password": "Se marcada, sua senha é armazenada sem criptografia nos arquivos de configuração do Home Assistant, onde qualquer pessoa que consiga ler esses arquivos ou um backup deles pode lê-la. Deixe desmarcada para guardar apenas o login salvo, que não é a sua senha e, portanto, não serve para nada em outros lugares onde você usa essa senha."
                 },
                 "description": "Fazer login na Verisure.",
                 "title": "Login"
@@ -134,6 +146,16 @@
                         "name": "Registro de atividade e eventos",
                         "data": {
                             "enable_activity_polling": "Consultar o registro de atividade uma vez por minuto em segundo plano (para automações por eventos)"
+                        }
+                    },
+                    "sign_in": {
+                        "name": "Login",
+                        "description": "Com esta caixa marcada, a integração guarda sua senha nos arquivos de configuração do Home Assistant para poder fazer login de novo sozinha. Se a Verisure rejeitou a senha guardada, ela já foi removida: faça login de novo com Reconfigurar para guardar uma nova.",
+                        "data": {
+                            "keep_password": "Guardar minha senha para que a integração possa fazer login de novo sozinha"
+                        },
+                        "data_description": {
+                            "keep_password": "Desmarque e salve para apagar na hora a senha guardada, sem fazer login. Para guardar sua senha de novo, use Reconfigurar, onde você a digita."
                         }
                     },
                     "advanced": {
@@ -299,6 +321,10 @@
         "renewal_refused": {
             "title": "A Verisure continua recusando o login salvo",
             "description": "Há pelo menos 15 minutos a Verisure se recusa a renovar o login salvo de {username}, então o Home Assistant não consegue se conectar ao seu alarme. Costuma ser um problema temporário da Verisure: a integração continua tentando a cada poucos minutos e se recupera sozinha se a Verisure voltar a aceitá-lo. Se isso não acontecer, entre novamente: abra Configurações → Dispositivos e Serviços → Verisure OWA, abra o menu (⋮) da entrada e escolha Reconfigurar. Este aviso some quando uma renovação ou um login funcionar."
+        },
+        "cannot_reach_verisure": {
+            "title": "O Home Assistant não consegue se conectar à Verisure",
+            "description": "Há pelo menos uma hora nenhuma solicitação do Home Assistant à Verisure para {username} funcionou. A integração continua tentando a cada poucos minutos e se recupera sozinha quando a Verisure voltar a responder. Verifique se o app da Verisure funciona e se o Home Assistant está conectado à internet. Se o app da Verisure funcionar e este aviso continuar, informe o problema com o log em {url}. Este aviso some quando uma solicitação à Verisure funcionar."
         }
     },
     "entity": {

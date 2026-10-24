@@ -2,6 +2,8 @@
 
 import logging
 
+import pytest
+
 from custom_components.securitas.log_filter import (
     SensitiveDataFilter,
     TransientCoordinatorErrorFilter,
@@ -154,6 +156,88 @@ def test_update_secret_replaces_old_value():
     # New value should be redacted
     assert "[AUTH_TOKEN]" in record.msg
     assert "new-token" not in record.msg
+
+
+def test_two_accounts_passwords_both_redacted():
+    """Per-account keys keep both passwords registered; the given label, not
+    the key, is what reaches the log."""
+    f = SensitiveDataFilter()
+    f.update_secret("password:aaaaaaaaaaaa", "first-secret", label="[PASSWORD]")
+    f.update_secret("password:bbbbbbbbbbbb", "second-secret", label="[PASSWORD]")
+
+    record = logging.LogRecord(
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
+        msg="first-secret and second-secret",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "[PASSWORD] and [PASSWORD]"
+
+
+@pytest.mark.parametrize("shorter_first", [True, False])
+def test_password_containing_another_is_fully_redacted(shorter_first):
+    """A password that contains another account's password is masked whole,
+    whichever was registered first, so its tail never reaches the log."""
+    f = SensitiveDataFilter()
+    passwords = [
+        ("password:aaaaaaaaaaaa", "shared-prefix"),
+        ("password:bbbbbbbbbbbb", "shared-prefix-private-suffix"),
+    ]
+    if not shorter_first:
+        passwords.reverse()
+    for key, value in passwords:
+        f.update_secret(key, value, label="[PASSWORD]")
+
+    record = logging.LogRecord(
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
+        msg="shared-prefix and shared-prefix-private-suffix",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "[PASSWORD] and [PASSWORD]"
+
+
+def test_token_containing_installation_number_is_fully_redacted():
+    """An installation number registered before a token that contains it does
+    not leave the rest of the token in the log."""
+    f = SensitiveDataFilter()
+    f.add_installation("1234567")
+    f.update_secret("auth_token", "tok-1234567-tail")
+
+    record = logging.LogRecord(
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
+        msg="token tok-1234567-tail for 1234567",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "token [AUTH_TOKEN] for ***4567"
+
+
+@pytest.mark.parametrize("replacement", [None, "new-secret"])
+def test_shared_value_stays_redacted_while_another_key_holds_it(replacement):
+    """Two accounts with the same password: clearing or changing one account's
+    leaves the other's redacted."""
+    f = SensitiveDataFilter()
+    f.update_secret("password:aaaaaaaaaaaa", "same-secret", label="[PASSWORD]")
+    f.update_secret("password:bbbbbbbbbbbb", "same-secret", label="[PASSWORD]")
+
+    f.update_secret("password:aaaaaaaaaaaa", replacement, label="[PASSWORD]")
+
+    assert f._redact("same-secret") == "[PASSWORD]"
+    f.update_secret("password:bbbbbbbbbbbb", None)
+    assert f._redact("same-secret") == "same-secret"
 
 
 def test_filter_always_returns_true():

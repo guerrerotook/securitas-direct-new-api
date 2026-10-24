@@ -25,7 +25,11 @@
                 "description": "La sessió ha caducat. Torneu a introduir la contrasenya per reconnectar.",
                 "data": {
                     "username": "Nom d'usuari",
-                    "password": "Contrasenya"
+                    "password": "Contrasenya",
+                    "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
+                },
+                "data_description": {
+                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que no és la vostra contrasenya i, per tant, no serveix de res enlloc més on feu servir aquesta contrasenya."
                 }
             },
             "reconfigure": {
@@ -33,14 +37,22 @@
                 "description": "Introduïu la contrasenya de Verisure per obtenir un inici de sessió nou. Feu-ho servir quan la integració no es pot connectar i no us ha demanat que torneu a iniciar la sessió.",
                 "data": {
                     "username": "Nom d'usuari",
-                    "password": "Contrasenya"
+                    "password": "Contrasenya",
+                    "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
+                },
+                "data_description": {
+                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que no és la vostra contrasenya i, per tant, no serveix de res enlloc més on feu servir aquesta contrasenya."
                 }
             },
             "user": {
                 "data": {
                     "country": "País",
                     "username": "Nom d'usuari",
-                    "password": "Contrasenya"
+                    "password": "Contrasenya",
+                    "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
+                },
+                "data_description": {
+                    "keep_password": "Si ho marqueu, la contrasenya es desa sense xifrar als fitxers de configuració de Home Assistant, on qualsevol persona que pugui llegir aquests fitxers o una còpia de seguretat seva la pot llegir. Deixeu-ho sense marcar per desar només l'inici de sessió guardat, que no és la vostra contrasenya i, per tant, no serveix de res enlloc més on feu servir aquesta contrasenya."
                 },
                 "description": "Inicia la sessió a Verisure.",
                 "title": "Inici de sessió"
@@ -134,6 +146,16 @@
                         "name": "Registre d'activitat i esdeveniments",
                         "data": {
                             "enable_activity_polling": "Consulta el registre d'activitat un cop per minut en segon pla (per a automatitzacions per esdeveniments)"
+                        }
+                    },
+                    "sign_in": {
+                        "name": "Inici de sessió",
+                        "description": "Amb aquesta casella marcada, la integració desa la vostra contrasenya als fitxers de configuració de Home Assistant per poder tornar a iniciar la sessió per si sola. Si Verisure ha rebutjat la contrasenya desada, ja s'ha eliminat: torneu a iniciar la sessió amb Reconfigura per desar-ne una de nova.",
+                        "data": {
+                            "keep_password": "Desa la meva contrasenya perquè la integració pugui tornar a iniciar la sessió per si sola"
+                        },
+                        "data_description": {
+                            "keep_password": "Desmarqueu-ho i deseu per esborrar la contrasenya desada a l'instant, sense iniciar la sessió. Per tornar a desar la contrasenya, feu servir Reconfigura, on l'escriviu."
                         }
                     },
                     "advanced": {
@@ -299,6 +321,10 @@
         "renewal_refused": {
             "title": "Verisure continua rebutjant la sessió desada",
             "description": "Fa almenys 15 minuts que Verisure rebutja renovar la sessió desada de {username}, de manera que Home Assistant no pot connectar amb la teva alarma. Sovint és un problema temporal de Verisure: la integració ho continua intentant cada pocs minuts i es recupera sola si Verisure torna a acceptar-la. Si no és així, torna a iniciar la sessió: obre Configuració → Dispositius i serveis → Verisure OWA, obre el menú (⋮) de l'entrada i tria Reconfigura. Aquest avís desapareix quan una renovació o un inici de sessió funciona."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant no pot connectar amb Verisure",
+            "description": "Fa almenys una hora que cap petició de Home Assistant a Verisure per a {username} no funciona. La integració ho continua intentant cada pocs minuts i es recupera sola quan Verisure torna a respondre. Comprova que l'app de Verisure funciona i que Home Assistant té connexió a internet. Si l'app de Verisure funciona i aquest avís continua, informa'n amb el registre a {url}. Aquest avís desapareix quan una petició a Verisure funciona."
         }
     },
     "entity": {

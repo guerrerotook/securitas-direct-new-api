@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import MethodType
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -53,6 +53,7 @@ from custom_components.securitas import (
     _async_teardown_domain_if_unused,
     _get_or_create_session,
     _login_or_raise,
+    _password_secret_key,
     _raise_sign_in_issue,
     async_remove_entry,
     async_unload_entry,
@@ -65,14 +66,19 @@ from custom_components.securitas.const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_KEEP_PASSWORD,
     CONF_REFRESH_TOKEN,
     PANEL_OPTION_KEYS,
 )
 from custom_components.securitas.hub import (
     VerisureHub,
     _renewal_refused_issue_id,
+    _unreachable_issue_id,
     raise_renewal_refused_issue,
+    raise_unreachable_issue,
+    setup_passwords,
 )
+from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
     PERI_DEFAULTS,
@@ -80,6 +86,7 @@ from custom_components.securitas.verisure_owa_api import (
     AccountBlockedError,
     Attribute,
     AuthenticationError,
+    HttpTransport,
     OtpPhone,
     TwoFactorRequiredError,
     VerisureOwaClient,
@@ -89,10 +96,14 @@ from custom_components.securitas.verisure_owa_api import (
 from tests.conftest import (
     FAKE_JWT,
     FAKE_REFRESH_TOKEN,
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
     refresh_login_crash_error,
+    refresh_token_rejected_response,
 )
 
 
@@ -3929,7 +3940,8 @@ async def test_reauth_shows_confirm_form(hass):
 
 
 async def test_reauth_confirm_valid_credentials(hass):
-    """Valid reauth captures a fresh refresh token; password is never persisted."""
+    """Valid reauth with the box unticked captures a fresh refresh token and
+    does not persist the password."""
     entry = _make_reauth_entry(hass)
     result = await _start_reauth_flow(hass, entry)
     flow_id = result["flow_id"]
@@ -5631,9 +5643,17 @@ async def _start_reconfigure_flow(hass, entry):
 
 
 async def _submit_sign_in(
-    hass, flow_id, hub, password="new-password", username="test@example.com"
+    hass,
+    flow_id,
+    hub,
+    password="new-password",
+    username="test@example.com",
+    keep_password=None,
 ):
     """Answer the entry's sign-in form (reauth or Reconfigure) with a reload that does nothing."""
+    user_input = {CONF_USERNAME: username, CONF_PASSWORD: password}
+    if keep_password is not None:
+        user_input[CONF_KEEP_PASSWORD] = keep_password
     with (
         _patches(hub),
         patch.object(
@@ -5641,11 +5661,7 @@ async def _submit_sign_in(
         ) as mock_reload,
     ):
         result = await hass.config_entries.flow.async_configure(
-            flow_id,
-            user_input={
-                CONF_USERNAME: username,
-                CONF_PASSWORD: password,
-            },
+            flow_id, user_input=user_input
         )
     return result, mock_reload
 
@@ -5671,7 +5687,8 @@ async def test_reconfigure_asks_for_the_password_with_the_username_filled_in(has
 
 
 async def test_reconfigure_saves_a_fresh_login_without_the_password(hass):
-    """Reconfigure saves the new refresh token, not the password, and reloads."""
+    """Reconfigure with the box unticked saves the new refresh token, not the
+    password, and reloads."""
     entry = _make_reauth_entry(hass)
     result = await _start_reconfigure_flow(hass, entry)
 
@@ -5682,6 +5699,935 @@ async def test_reconfigure_saves_a_fresh_login_without_the_password(hass):
     assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
     assert CONF_PASSWORD not in entry.data
     mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+def _schema_field(result, name):
+    return next(key for key in result["data_schema"].schema if str(key) == name)
+
+
+def _make_kept_password_entry(hass, **data) -> MockConfigEntry:
+    """A reauth entry whose owner ticked the keep-password box."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_123456",
+        data={
+            **REAUTH_ENTRY_DATA,
+            CONF_PASSWORD: "old-password",
+            CONF_KEEP_PASSWORD: True,
+            **data,
+        },
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+@pytest.mark.parametrize(
+    ("fault", "error"),
+    [
+        *((fault, "cannot_connect") for fault in LOGIN_SERVER_FAULTS),
+        ("wrong-password", "invalid_auth"),
+    ],
+)
+async def test_setup_sign_in_server_fault_shows_cannot_connect(hass, fault, error):
+    """A server fault answering the dialog's sign-in says nothing about
+    the password, so the dialog does not call it wrong."""
+    reply = login_error_reply(
+        LOGIN_WRONG_PASSWORD
+        if fault == "wrong-password"
+        else LOGIN_SERVER_FAULTS[fault]
+    )
+    with (
+        patch(PATCH_SESSION, return_value=MagicMock()),
+        patch.object(
+            HttpTransport, "execute", new_callable=AsyncMock, return_value=reply
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": error}
+
+
+async def test_setup_with_keep_password_stores_it(hass):
+    """Ticking the box in setup keeps the typed password in the entry."""
+    result = await _complete_full_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_KEEP_PASSWORD: True},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEEP_PASSWORD] is True
+    assert result["data"][CONF_PASSWORD] == "test-password"
+    assert result["data"][CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
+async def test_setup_without_keep_password_drops_it(hass):
+    """Leaving the box unticked in setup stores only the saved sign-in."""
+    result = await _complete_full_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_KEEP_PASSWORD: False},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in result["data"]
+
+
+TICKED_CREDENTIALS = {
+    **USER_INPUT_CREDENTIALS,
+    CONF_PASSWORD: "typed-password",
+    CONF_KEEP_PASSWORD: True,
+}
+
+
+def _new_sign_in_hub():
+    """The hub a ticked dialog builds; its sign-in has its own refresh token."""
+    hub = _two_installation_hub()
+    hub.get_refresh_token.return_value = "new-refresh-token"
+    return hub
+
+
+async def test_add_installation_ticked_on_running_account_signs_in(hass):
+    """Ticked, a second installation on a running account signs in with the
+    typed password and replaces the account's session at once: the running
+    entry moves onto the new sign-in, and the new entry stores it."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    new_hub = _new_sign_in_hub()
+
+    with _patches(new_hub) as hub_cls:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+
+    assert result["step_id"] == "options"
+    new_hub.login.assert_awaited_once()
+    built_with = hub_cls.call_args.args[0]
+    assert built_with[CONF_PASSWORD] == "typed-password"
+    assert built_with[CONF_DEVICE_ID] == running.config[CONF_DEVICE_ID]
+    assert built_with[CONF_UNIQUE_ID] == running.config[CONF_UNIQUE_ID]
+    assert built_with[CONF_DEVICE_INDIGITALL] == running.config[CONF_DEVICE_INDIGITALL]
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is new_hub
+    assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert home.state is ConfigEntryState.LOADED
+    assert session["holders"] == {
+        home.entry_id,
+        f"config_flow:{result['flow_id']}",
+    }
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert result["data"][CONF_PASSWORD] == "typed-password"
+    assert result["data"][CONF_DEVICE_ID] == running.config[CONF_DEVICE_ID]
+    assert _flow_sessions(hass)["test@example.com"]["hub"] is new_hub
+    assert setup_passwords(hass) == {}
+
+
+async def test_add_installation_ticked_wrong_password_shows_invalid_auth(hass):
+    """A wrong typed password is caught now; the running session and its
+    entries carry on untouched."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    holders_before = set(record["holders"])
+    home_data_before = dict(home.data)
+    new_hub = _new_sign_in_hub()
+    new_hub.login.side_effect = AuthenticationError("bad credentials")
+
+    with _patches(new_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is running
+    assert record["holders"] == holders_before
+    assert dict(home.data) == home_data_before
+    assert home.state is ConfigEntryState.LOADED
+
+
+async def test_add_installation_ticked_without_a_refresh_token_changes_nothing(hass):
+    """A sign-in that returns no saved sign-in replaces nothing: the running
+    entry keeps its session, and the account's setup tracking and notices
+    stay; the dialog then refuses to create the entry."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    home_data_before = dict(home.data)
+    domain_data = hass.data[DOMAIN]
+    refusal = {"since": datetime.now(UTC), "alerted": False}
+    domain_data.setdefault("refresh_refusals", {})["test@example.com"] = refusal
+    unreachable = {"since": datetime.now(UTC), "alerted": True}
+    domain_data.setdefault("unreachable", {})["test@example.com"] = unreachable
+    raise_unreachable_issue(hass, "test@example.com")
+    new_hub = _new_sign_in_hub()
+    new_hub.get_refresh_token.return_value = None
+
+    with (
+        _patches(new_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+
+    assert result["step_id"] == "options"
+    new_hub.login.assert_awaited_once()
+    mock_reload.assert_not_awaited()
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is running
+    assert dict(home.data) == home_data_before
+    assert _refusals(hass)["test@example.com"] is refusal
+    assert domain_data["unreachable"]["test@example.com"] is unreachable
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, _unreachable_issue_id("test@example.com")
+    )
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "no_refresh_token"
+
+
+async def test_add_installation_ticked_then_abandoned_leaves_other_entries_working(
+    hass,
+):
+    """Closing the dialog after the sign-in leaves the running entry on the
+    new sign-in, which replaced its old one, and lets the dialog's hold go."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    new_hub = _new_sign_in_hub()
+
+    with _patches(new_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert result["step_id"] == "options"
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is new_hub
+    assert session["holders"] == {home.entry_id}
+    assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert home.state is ConfigEntryState.LOADED
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert setup_passwords(hass) == {}
+
+
+async def _reject_kept_password(hass, password):
+    """Have Verisure refuse the account's saved sign-in and then reject the
+    kept ``password`` it is retried with, as a running entry's renewal would."""
+    rejected = VerisureHub(
+        {
+            **make_config_entry_data(password=password),
+            CONF_KEEP_PASSWORD: True,
+            CONF_REFRESH_TOKEN: "saved-token",
+        },
+        None,
+        MagicMock(),
+        hass,
+    )
+    rejected.client._transport.execute = AsyncMock(
+        side_effect=[
+            refresh_token_rejected_response(),
+            login_error_reply(LOGIN_WRONG_PASSWORD),
+        ]
+    )
+    with pytest.raises(AuthenticationError):
+        await rejected.client._check_authentication_token()
+
+
+@pytest.mark.parametrize("running_account", [True, False])
+async def test_add_installation_ticked_does_not_save_a_password_rejected_meanwhile(
+    hass, running_account
+):
+    """Verisure rejecting the typed password while the dialog is still open
+    removes it from the dialog too: the new entry keeps the box ticked but no
+    password, like the account's other entries, so nothing retries it."""
+    if running_account:
+        home = await _load_home_entry(hass, _two_installation_hub())
+        hass.config_entries.async_update_entry(
+            home, data={**home.data, CONF_KEEP_PASSWORD: True}
+        )
+    with _patches(_new_sign_in_hub()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+        if not running_account:
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input={CONF_INSTALLATION: "111"}
+            )
+    assert result["step_id"] == "options"
+
+    await _reject_kept_password(hass, "typed-password")
+    if running_account:
+        assert CONF_PASSWORD not in home.data
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEEP_PASSWORD] is True
+    assert CONF_PASSWORD not in result["data"]
+
+
+async def test_add_installation_ticked_keeps_a_different_password_than_one_rejected(
+    hass,
+):
+    """Only the password Verisure rejected is dropped: the dialog's own,
+    just proven, stays when another one is rejected."""
+    with _patches(_new_sign_in_hub()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_INSTALLATION: "111"}
+        )
+
+    await _reject_kept_password(hass, "old-password")
+    result = await _finish_from_options(hass, result)
+
+    assert result["data"][CONF_PASSWORD] == "typed-password"
+
+
+@pytest.mark.parametrize("reconfigure_ticked", [True, False])
+async def test_add_installation_ticked_saves_the_password_of_a_newer_sign_in(
+    hass, reconfigure_ticked
+):
+    """A Reconfigure of the account that signs in while the dialog is still
+    open replaces the dialog's sign-in: the new entry stores the newer saved
+    sign-in and the password proven with it, as the account's other ticked
+    entries do, never the dialog's older one beside it."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    with _patches(_new_sign_in_hub()):
+        pending = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert pending["step_id"] == "options"
+    reconfigure = await _start_reconfigure_flow(hass, home)
+    replacement = _new_sign_in_hub()
+    replacement.get_refresh_token.return_value = "latest-token"
+    done, _ = await _submit_sign_in(
+        hass,
+        reconfigure["flow_id"],
+        replacement,
+        password="new-password",
+        keep_password=reconfigure_ticked,
+    )
+    assert done["reason"] == "reconfigure_successful"
+
+    created = await _finish_from_options(hass, pending)
+
+    assert created["data"][CONF_REFRESH_TOKEN] == "latest-token"
+    assert created["data"][CONF_KEEP_PASSWORD] is True
+    assert created["data"][CONF_PASSWORD] == "new-password"
+
+
+def _meanwhile_setup_reloads_the_account(action):
+    """Run ``action`` while a setup dialog that has just replaced the
+    account's session waits for the account's entries to reload: the lock is
+    already released, so another dialog or a renewal can act then."""
+    original = FlowHandler._reload_onto_sign_in
+
+    async def reload(self, username, entries):
+        if self.source == SOURCE_USER:
+            await action()
+        await original(self, username, entries)
+
+    return patch.object(FlowHandler, "_reload_onto_sign_in", reload)
+
+
+async def test_add_installation_ticked_saves_a_newer_sign_in_made_during_its_reload(
+    hass,
+):
+    """A Reconfigure finishing while the ticked dialog's own sign-in is still
+    reloading the account's entries replaces that sign-in: the new entry
+    stores the newer password beside the newer saved sign-in."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    replacement = _new_sign_in_hub()
+    replacement.get_refresh_token.return_value = "latest-token"
+
+    async def reconfigure_the_account():
+        reconfigure = await _start_reconfigure_flow(hass, home)
+        done, _ = await _submit_sign_in(
+            hass,
+            reconfigure["flow_id"],
+            replacement,
+            password="new-password",
+            keep_password=True,
+        )
+        assert done["reason"] == "reconfigure_successful"
+
+    with (
+        _patches(_new_sign_in_hub()),
+        _meanwhile_setup_reloads_the_account(reconfigure_the_account),
+    ):
+        pending = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert pending["step_id"] == "options"
+
+    created = await _finish_from_options(hass, pending)
+
+    assert created["data"][CONF_REFRESH_TOKEN] == "latest-token"
+    assert created["data"][CONF_KEEP_PASSWORD] is True
+    assert created["data"][CONF_PASSWORD] == "new-password"
+
+
+async def test_add_installation_ticked_drops_a_password_rejected_during_its_reload(
+    hass,
+):
+    """Verisure rejecting the typed password while the ticked dialog's own
+    sign-in is still reloading the account's entries removes it from the
+    dialog too: the new entry keeps the box ticked but stores no password."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    hass.config_entries.async_update_entry(
+        home, data={**home.data, CONF_KEEP_PASSWORD: True}
+    )
+
+    async def reject_the_typed_password():
+        await _reject_kept_password(hass, "typed-password")
+
+    with (
+        _patches(_new_sign_in_hub()),
+        _meanwhile_setup_reloads_the_account(reject_the_typed_password),
+    ):
+        pending = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+    assert pending["step_id"] == "options"
+    assert CONF_PASSWORD not in home.data
+
+    created = await _finish_from_options(hass, pending)
+
+    assert created["type"] == FlowResultType.CREATE_ENTRY
+    assert created["data"][CONF_KEEP_PASSWORD] is True
+    assert CONF_PASSWORD not in created["data"]
+
+
+async def test_add_installation_ticked_through_a_text_message_code_signs_in(hass):
+    """A ticked sign-in that needs a text-message code replaces the running
+    session once the code is accepted, not before."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    new_hub = _hub_factory(two_fa=True)
+    new_hub.config = make_config_entry_data()
+    new_hub.client.list_installations = running.client.list_installations
+    new_hub.get_refresh_token.return_value = "new-refresh-token"
+
+    with _patches(new_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=TICKED_CREDENTIALS
+        )
+        assert result["step_id"] == "phone_list"
+        assert _flow_sessions(hass)["test@example.com"] is record
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={"phones": "0_555-1234"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["step_id"] == "options"
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is new_hub
+    assert home.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert home.entry_id in session["holders"]
+
+
+async def test_add_installation_unticked_on_running_account_borrows(hass):
+    """Unticked, a second installation borrows the running session and never
+    signs in."""
+    running = _two_installation_hub()
+    home = await _load_home_entry(hass, running)
+    record = _flow_sessions(hass)["test@example.com"]
+    running.login.reset_mock()
+    new_hub = _new_sign_in_hub()
+
+    with _patches(new_hub) as hub_cls:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+            data={**TICKED_CREDENTIALS, CONF_KEEP_PASSWORD: False},
+        )
+
+    assert result["step_id"] == "options"
+    hub_cls.assert_not_called()
+    new_hub.login.assert_not_awaited()
+    running.login.assert_not_awaited()
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is running
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_PASSWORD not in result["data"]
+    assert home.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
+async def test_setup_form_offers_the_box_unticked_after_the_password(hass):
+    """The setup form shows the box, off by default, below the password."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    names = [str(key) for key in result["data_schema"].schema]
+    assert names.index(CONF_KEEP_PASSWORD) == names.index(CONF_PASSWORD) + 1
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is False
+
+
+async def test_reconfigure_ticking_stores_password(hass):
+    """Ticking the box in Reconfigure keeps the password just proven."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=True
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
+async def test_reconfigure_unticking_removes_password(hass):
+    """Unticking the box in Reconfigure deletes the kept password."""
+    entry = _make_kept_password_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is True
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=False
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+
+
+async def test_reauth_form_shows_current_choice(hass):
+    """The reauth form shows the entry's current choice, ticked or not."""
+    ticked = _make_kept_password_entry(hass)
+    result = await _start_reauth_flow(hass, ticked)
+
+    names = [str(key) for key in result["data_schema"].schema]
+    assert names.index(CONF_KEEP_PASSWORD) == names.index(CONF_PASSWORD) + 1
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is True
+
+    unticked = _make_reauth_office_entry(hass)
+    result = await _start_reauth_flow(hass, unticked)
+
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is False
+
+
+async def test_reauth_ticking_stores_password(hass):
+    """Ticking the box in reauth keeps the password just proven."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=True
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+
+
+async def test_reauth_after_a_rejected_kept_password_keeps_the_new_one(hass):
+    """Verisure rejected the kept password, so it was removed but the box was
+    left ticked: the reauth form shows it ticked, and the new password is
+    kept."""
+    entry = _make_kept_password_entry(hass)
+    data = dict(entry.data)
+    data.pop(CONF_PASSWORD)
+    hass.config_entries.async_update_entry(entry, data=data)
+    result = await _start_reauth_flow(hass, entry)
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is True
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+
+
+async def test_reconfigure_updates_kept_password_on_other_ticked_entries(hass):
+    """Another ticked entry on the account takes the password just proven,
+    so a password change leaves no stale kept password; its box stays as is."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    hass.config_entries.async_update_entry(
+        office, data={**office.data, CONF_KEEP_PASSWORD: True}
+    )
+    result = await _start_reconfigure_flow(hass, home)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=False
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert office.data[CONF_KEEP_PASSWORD] is True
+    assert office.data[CONF_PASSWORD] == "new-password"
+    assert office.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    assert CONF_PASSWORD not in home.data
+
+
+async def test_untick_in_reconfigure_stops_using_password(hass):
+    """Unticking in Reconfigure drops the password from the account's client
+    at once, the one just typed included."""
+    entry = _make_kept_password_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    # The real hub's client holds the password the dialog signed in with.
+    hub.client.password = "new-password"
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, keep_password=False)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert hub.client.password == ""
+    assert hub.client.password_kept is False
+
+
+@pytest.mark.parametrize("keep_password", [True, False])
+async def test_reconfigure_onto_another_account_stops_the_old_one_using_the_password(
+    hass, keep_password
+):
+    """An entry moved to another account no longer provides a kept password
+    to its first account's client."""
+    entry = _make_kept_password_entry(hass)
+    old_hub = make_securitas_hub_mock()
+    old_hub.client.password = "old-password"
+    old_hub.client.password_kept = True
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "test@example.com": {"hub": old_hub, "holders": {entry.entry_id}}
+    }
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(
+        hass,
+        result["flow_id"],
+        _reauth_hub_seeing("123456"),
+        username="other@example.com",
+        keep_password=keep_password,
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_USERNAME] == "other@example.com"
+    assert old_hub.client.password == ""
+    assert old_hub.client.password_kept is False
+
+
+async def test_untick_in_reconfigure_unregisters_the_password_from_the_log(hass):
+    """No client holds the password once the box is unticked, so the log
+    filter stops looking for it."""
+    entry = _make_kept_password_entry(hass)
+    log_filter = SensitiveDataFilter()
+    log_filter.update_secret(
+        _password_secret_key("test@example.com"), "old-password", label="[PASSWORD]"
+    )
+    hass.data.setdefault(DOMAIN, {})["log_filter"] = log_filter
+    assert log_filter._redact("old-password") == "[PASSWORD]"
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    hub.client.password = "old-password"
+    hub.client.password_kept = True
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, keep_password=False)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert log_filter._redact("old-password") == "old-password"
+
+
+async def test_untick_in_reconfigure_keeps_other_ticked_entrys_password(hass):
+    """Unticking one entry leaves the client with the password another
+    ticked entry on the account still keeps."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    hass.config_entries.async_update_entry(
+        office,
+        data={**office.data, CONF_KEEP_PASSWORD: True, CONF_PASSWORD: "old"},
+    )
+    result = await _start_reconfigure_flow(hass, home)
+    hub = _hub_factory()
+    hub.client.password = "new-password"
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, keep_password=False)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert hub.client.password == "new-password"
+    assert hub.client.password_kept is True
+
+
+async def test_reconfigure_leaves_other_unticked_entries_without_password(hass):
+    """Ticking the box on one entry does not tick it, or store the password,
+    on the account's other entries."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    result = await _start_reconfigure_flow(hass, home)
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=True
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert CONF_PASSWORD not in office.data
+    assert office.data.get(CONF_KEEP_PASSWORD, False) is False
+    assert home.data[CONF_PASSWORD] == "new-password"
+
+
+async def test_a_failed_sign_in_keeps_the_choice_just_made(hass):
+    """Unticking, then typing a wrong password, shows the box still unticked,
+    and the following correct sign-in stores no password."""
+    entry = _make_kept_password_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    hub.login.side_effect = AuthenticationError("bad credentials")
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], hub, password="wrong", keep_password=False
+    )
+
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert _schema_field(result, CONF_KEEP_PASSWORD).default() is False
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], _hub_factory(), keep_password=False
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+
+
+def _make_options_entry_with_kept_password(hass, *, keep: bool = True):
+    """An entry with one lock, so the Configure dialog runs all three steps,
+    and the account's shared client holding the kept password."""
+    entry = _make_entry_with_locks(
+        hass, registered_locks=[{"device_id": "lockA", "alias": "Front Door"}]
+    )
+    data = {**entry.data, CONF_KEEP_PASSWORD: keep}
+    if not keep:
+        data.pop(CONF_PASSWORD, None)
+    hass.config_entries.async_update_entry(entry, data=data)
+    hub = make_securitas_hub_mock()
+    if keep:
+        hub.client.password = entry.data[CONF_PASSWORD]
+        hub.client.password_kept = True
+    hass.data[DOMAIN]["sessions"] = {"test@example.com": {"hub": hub}}
+    return entry, hub
+
+
+async def _submit_options_init(hass, entry, sign_in: dict):
+    """Open the Configure dialog and submit its first page with ``sign_in``
+    as the sign-in section's payload."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    base: dict = {
+        "pin": {CONF_CODE: "", CONF_CODE_ARM_REQUIRED: False},
+        "notifications": {},
+        CONF_ADVANCED: {
+            CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
+            CONF_DELAY_CHECK_OPERATION: float(DEFAULT_DELAY_CHECK_OPERATION),
+        },
+    }
+    base["sign_in"] = sign_in
+    user_input = _fill_optional_sections(result, base)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+
+
+async def _finish_options(hass, result):
+    """Submit the mappings and lock pages of an open Configure dialog."""
+    assert result["step_id"] == "mappings"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+        },
+    )
+    assert result["step_id"] == "lock_automations"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"lock__lockA": {}}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    return result
+
+
+async def test_options_shows_keep_password_only_when_kept(hass):
+    """Configure shows the box, ticked, only on an entry that keeps a password:
+    turning it on needs Reconfigure, where the password is typed."""
+    kept, _ = _make_options_entry_with_kept_password(hass)
+    result = await hass.config_entries.options.async_init(kept.entry_id)
+    assert _section_inner_keys(result["data_schema"], "sign_in") == {CONF_KEEP_PASSWORD}
+    marker = _section_inner_marker(result["data_schema"], "sign_in", CONF_KEEP_PASSWORD)
+    assert marker.default() is True
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    hass.config_entries.async_update_entry(
+        kept,
+        data={
+            k: v
+            for k, v in kept.data.items()
+            if k not in (CONF_PASSWORD, CONF_KEEP_PASSWORD)
+        }
+        | {CONF_KEEP_PASSWORD: False},
+    )
+    result = await hass.config_entries.options.async_init(kept.entry_id)
+    assert "sign_in" not in _section_keys(result["data_schema"])
+    assert CONF_KEEP_PASSWORD not in _all_form_keys(result["data_schema"])
+
+
+async def test_options_untick_removes_password_without_signing_in(hass):
+    """Unticking and saving deletes the kept password and the client stops
+    using it, with no request to Verisure."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+
+    with patch.object(HttpTransport, "execute", new_callable=AsyncMock) as transport:
+        result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+        await _finish_options(hass, result)
+
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+    assert hub.client.password == ""
+    assert hub.client.password_kept is False
+    transport.assert_not_called()
+    assert hub.mock_calls == []
+    assert hub.client.mock_calls == []
+
+
+async def test_options_untick_with_the_password_already_forgotten(hass):
+    """After Verisure rejected the kept password the box is still ticked
+    with no password: Configure still offers it, and unticking just clears
+    the box."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+    data = dict(entry.data)
+    data.pop(CONF_PASSWORD)
+    hass.config_entries.async_update_entry(entry, data=data)
+    hub.client.password = ""
+    hub.client.password_kept = False
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert _section_inner_keys(result["data_schema"], "sign_in") == {CONF_KEEP_PASSWORD}
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+    await _finish_options(hass, result)
+
+    assert entry.data[CONF_KEEP_PASSWORD] is False
+    assert CONF_PASSWORD not in entry.data
+    assert hub.client.password == ""
+
+
+async def test_options_untick_then_abandon_keeps_password(hass):
+    """Closing the dialog before its last page changes nothing."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+    assert result["step_id"] == "mappings"
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "test-password"
+    assert hub.client.password == "test-password"
+    assert hub.client.password_kept is True
+
+
+async def test_options_keep_password_not_saved_in_options(hass):
+    """The box lives in entry data; neither choice lands in the options."""
+    entry, _ = _make_options_entry_with_kept_password(hass)
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: True})
+    result = await _finish_options(hass, result)
+
+    assert CONF_KEEP_PASSWORD not in result["data"]
+    assert CONF_KEEP_PASSWORD not in entry.options
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: False})
+    result = await _finish_options(hass, result)
+
+    assert CONF_KEEP_PASSWORD not in result["data"]
+    assert CONF_KEEP_PASSWORD not in entry.options
+
+
+async def test_options_leaving_it_ticked_changes_nothing(hass):
+    """Saving with the box still ticked keeps the password and the client's
+    use of it."""
+    entry, hub = _make_options_entry_with_kept_password(hass)
+    data_before = dict(entry.data)
+
+    result = await _submit_options_init(hass, entry, {CONF_KEEP_PASSWORD: True})
+    await _finish_options(hass, result)
+
+    assert dict(entry.data) == data_before
+    assert hub.client.password == "test-password"
+    assert hub.client.password_kept is True
+
+
+async def test_setup_options_step_has_no_sign_in_section(hass):
+    """Setup's settings page has no sign-in section: the box is on the
+    sign-in page itself."""
+    with _patches(_hub_factory()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+            data={**USER_INPUT_CREDENTIALS, CONF_KEEP_PASSWORD: True},
+        )
+
+    assert result["step_id"] == "options"
+    assert "sign_in" not in _section_keys(result["data_schema"])
+
+
+async def test_reauth_ticking_through_a_text_message_code_stores_password(hass):
+    """A ticked reauth that needs a text-message code stores the password."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+    mock_hub = _hub_factory(two_fa=True)
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+                CONF_KEEP_PASSWORD: True,
+            },
+        )
+        assert result["step_id"] == "phone_list"
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={"phones": "0_555-1234"}
+        )
+        assert result["step_id"] == "otp_challenge"
+    with (
+        _patches(mock_hub),
+        patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_KEEP_PASSWORD] is True
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
 
 
 async def test_reconfigure_with_a_wrong_password_asks_again(hass):
@@ -6078,6 +7024,39 @@ async def test_signing_in_again_clears_the_accounts_renewal_refused_notice(
 
     assert result["reason"] == reason
     assert _renewal_refused_issue_ids(hass) == []
+
+
+async def test_reconfigure_clears_the_unreachable_notice(hass):
+    """The dialog's sign-in is a request to Verisure that worked: the "can't
+    reach Verisure" notice and setup's tracking of the period both go."""
+    entry = _make_reauth_entry(hass)
+    raise_unreachable_issue(hass, "test@example.com")
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, _unreachable_issue_id("test@example.com")
+    )
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data.setdefault("unreachable", {})["test@example.com"] = {
+        "since": datetime.now(UTC),
+        "alerted": True,
+    }
+    # Another account stays loaded so the flow's clean-up does not drop
+    # hass.data[DOMAIN] wholesale, which would hide a missing reset.
+    domain_data.setdefault("sessions", {})["other@example.com"] = {
+        "hub": MagicMock(),
+        "holders": {"other-account-entry-id"},
+    }
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["reason"] == "reconfigure_successful"
+    assert (
+        ir.async_get(hass).async_get_issue(
+            DOMAIN, _unreachable_issue_id("test@example.com")
+        )
+        is None
+    )
+    assert "test@example.com" not in hass.data[DOMAIN]["unreachable"]
 
 
 async def test_reconfigure_signs_in_an_entry_waiting_to_retry_a_refused_token(hass):

@@ -25,7 +25,11 @@
                 "description": "La sessione è scaduta. Inserisci nuovamente la password per riconnetterti.",
                 "data": {
                     "username": "Nome utente",
-                    "password": "Password"
+                    "password": "Password",
+                    "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
+                },
+                "data_description": {
+                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che non è la tua password e quindi non serve a nulla altrove dove usi quella password."
                 }
             },
             "reconfigure": {
@@ -33,14 +37,22 @@
                 "description": "Inserisci la password di Verisure per ottenere un nuovo accesso. Usa questa opzione quando l'integrazione non riesce a connettersi e non ti ha chiesto di accedere di nuovo.",
                 "data": {
                     "username": "Nome utente",
-                    "password": "Password"
+                    "password": "Password",
+                    "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
+                },
+                "data_description": {
+                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che non è la tua password e quindi non serve a nulla altrove dove usi quella password."
                 }
             },
             "user": {
                 "data": {
                     "country": "Codice paese",
                     "username": "Nome utente",
-                    "password": "Password"
+                    "password": "Password",
+                    "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
+                },
+                "data_description": {
+                    "keep_password": "Se selezionata, la password viene salvata non cifrata nei file di configurazione di Home Assistant, dove chiunque possa leggere quei file o un loro backup può leggerla. Lasciala deselezionata per conservare solo l'accesso salvato, che non è la tua password e quindi non serve a nulla altrove dove usi quella password."
                 },
                 "description": "Accedi a Verisure.",
                 "title": "Accesso"
@@ -134,6 +146,16 @@
                         "name": "Registro attività ed eventi",
                         "data": {
                             "enable_activity_polling": "Interroga il registro attività una volta al minuto in background (per le automazioni basate su eventi)"
+                        }
+                    },
+                    "sign_in": {
+                        "name": "Accesso",
+                        "description": "Con questa casella spuntata, l'integrazione conserva la tua password nei file di configurazione di Home Assistant per poter accedere di nuovo da sola. Se Verisure ha rifiutato la password conservata, è già stata rimossa: accedi di nuovo con Riconfigura per conservarne una nuova.",
+                        "data": {
+                            "keep_password": "Conserva la mia password così l'integrazione può accedere di nuovo da sola"
+                        },
+                        "data_description": {
+                            "keep_password": "Deseleziona e salva per eliminare subito la password conservata, senza accedere. Per conservare di nuovo la password, usa Riconfigura, dove la digiti."
                         }
                     },
                     "advanced": {
@@ -299,6 +321,10 @@
         "renewal_refused": {
             "title": "Verisure continua a rifiutare l'accesso salvato",
             "description": "Da almeno 15 minuti Verisure rifiuta di rinnovare l'accesso salvato di {username}, quindi Home Assistant non riesce a raggiungere l'allarme. Spesso è un problema temporaneo di Verisure: l'integrazione continua a riprovare ogni pochi minuti e si ripristina da sola se Verisure torna ad accettarlo. Altrimenti accedi di nuovo: apri Impostazioni → Dispositivi e servizi → Verisure OWA, apri il menu (⋮) della voce e scegli Riconfigura. Questo avviso scompare quando un rinnovo o un accesso riesce."
+        },
+        "cannot_reach_verisure": {
+            "title": "Home Assistant non riesce a raggiungere Verisure",
+            "description": "Da almeno un'ora nessuna richiesta di Home Assistant a Verisure per {username} è andata a buon fine. L'integrazione continua a riprovare ogni pochi minuti e si ripristina da sola quando Verisure torna a rispondere. Controlla che l'app Verisure funzioni e che Home Assistant sia connesso a Internet. Se l'app Verisure funziona e questo avviso resta, segnalalo con il log su {url}. Questo avviso scompare quando una richiesta a Verisure riesce."
         }
     },
     "entity": {

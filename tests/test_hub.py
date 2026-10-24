@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
+    CONF_KEEP_PASSWORD,
     CONF_REFRESH_TOKEN,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
@@ -21,17 +22,39 @@ from custom_components.securitas.verisure_owa_api import (
     AccountBlockedError,
     APIConnectionError,
     AuthenticationError,
+    TwoFactorRequiredError,
     VerisureOwaError,
 )
 from custom_components.securitas.verisure_owa_api.client._base import (
     _token_fingerprint,
+)
+from custom_components.securitas.verisure_owa_api.exceptions import (
+    dead_refresh_token_signal,
 )
 from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
 
-from .conftest import make_installation
+from .conftest import (
+    login_rejected_error,
+    make_installation,
+    refresh_login_crash_error,
+    refresh_token_rejected_err7_error,
+    refresh_token_rejected_err99_error,
+    refresh_token_rejected_error,
+)
+
+_REFUSALS = pytest.mark.parametrize(
+    "make_refusal",
+    [
+        refresh_token_rejected_error,
+        refresh_token_rejected_err7_error,
+        refresh_token_rejected_err99_error,
+        refresh_login_crash_error,
+    ],
+    ids=["err4", "err7", "err99", "crash"],
+)
 
 _HUB_LOGGER = "custom_components.securitas.hub"
 
@@ -78,6 +101,21 @@ class TestConstruction:
             mock_client=False, **{CONF_REFRESH_TOKEN: "persisted-refresh-token"}
         )
         assert hub.client.refresh_token_value == "persisted-refresh-token"
+
+    @pytest.mark.parametrize("kept", [True, False])
+    def test_keep_password_flag_reaches_the_client(self, kept):
+        hub = make_hub(mock_client=False, **{CONF_KEEP_PASSWORD: kept})
+        assert hub.client.password_kept is kept
+
+    def test_ticked_box_without_a_password_keeps_nothing(self):
+        """The box stays ticked after Verisure rejected the kept password,
+        which was removed: there is nothing to sign in with."""
+        hub = make_hub(mock_client=False, password="", **{CONF_KEEP_PASSWORD: True})
+        assert hub.client.password_kept is False
+
+    def test_client_password_not_kept_without_the_flag(self):
+        hub = make_hub(mock_client=False)
+        assert hub.client.password_kept is False
 
     def test_get_refresh_token_returns_clients_refresh_token_value(self):
         """The hub-level getter mirrors get_authentication_token."""
@@ -203,6 +241,108 @@ class TestRenewalRefusedIssue:
         assert _domain_issues(hass) == {}
 
 
+_UNREACHABLE_ID = (
+    "cannot_reach_verisure_" + hashlib.sha256(b"test@example.com").hexdigest()[:12]
+)
+
+
+def _raise_sign_in_issue_for_test(hass) -> None:
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _SIGN_IN_ID,
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="sign_in_again",
+        translation_placeholders={"username": "test@example.com"},
+    )
+
+
+class TestUnreachableIssue:
+    """When the client says no request to Verisure has worked for an hour, the
+    hub raises a Repairs issue; one problem, one notice, so the refusal and
+    sign-in notices take precedence."""
+
+    _hub = staticmethod(TestRenewalRefusedIssue._hub)
+
+    async def test_unreachable_alert_raises_and_clears_the_issue(self, hass):
+        hub = self._hub(hass)
+
+        hub.client._notify_unreachable_alert(True)
+
+        issues = _domain_issues(hass)
+        assert list(issues) == [_UNREACHABLE_ID]
+        issue = issues[_UNREACHABLE_ID]
+        assert issue.translation_key == "cannot_reach_verisure"
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.is_persistent is False
+        assert issue.is_fixable is False
+        assert issue.translation_placeholders == {
+            "username": "test@example.com",
+            "url": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
+        }
+        assert "@" not in _UNREACHABLE_ID
+
+        hub.client._notify_unreachable_alert(False)
+
+        assert _domain_issues(hass) == {}
+
+    async def test_unreachable_notice_not_raised_while_refusal_notice_shows(self, hass):
+        hub = self._hub(hass)
+        hub.client._notify_refusal_alert(True)
+
+        hub.client._notify_unreachable_alert(True)
+
+        assert list(_domain_issues(hass)) == [_RENEWAL_REFUSED_ID]
+
+    async def test_unreachable_notice_not_raised_while_sign_in_notice_shows(self, hass):
+        hub = self._hub(hass)
+        _raise_sign_in_issue_for_test(hass)
+
+        hub.client._notify_unreachable_alert(True)
+
+        assert list(_domain_issues(hass)) == [_SIGN_IN_ID]
+
+    async def test_refusal_notice_removes_unreachable_notice(self, hass):
+        hub = self._hub(hass)
+        hub.client._notify_unreachable_alert(True)
+        assert list(_domain_issues(hass)) == [_UNREACHABLE_ID]
+
+        hub.client._notify_refusal_alert(True)
+
+        assert list(_domain_issues(hass)) == [_RENEWAL_REFUSED_ID]
+
+    async def test_detached_hub_does_not_raise_unreachable_notice(self, hass):
+        """Like the refusal notice: a detached hub, or one whose entry moved
+        to another account, raises nothing and clears nothing a live hub
+        raised."""
+        live = self._hub(hass)
+        retired = self._hub(hass, attached=False)
+
+        retired.client._notify_unreachable_alert(True)
+        assert _domain_issues(hass) == {}
+
+        live.client._notify_unreachable_alert(True)
+        retired.client._notify_unreachable_alert(False)
+        assert list(_domain_issues(hass)) == [_UNREACHABLE_ID]
+
+        live.client._notify_unreachable_alert(False)
+        assert live.config_entry is not None
+        hass.config_entries.async_update_entry(
+            live.config_entry, data={"username": "other@example.com"}
+        )
+        live.client._notify_unreachable_alert(True)
+        assert _domain_issues(hass) == {}
+
+    def test_unreachable_alert_raised_passes_through(self):
+        hub = make_hub()
+        hub.client.unreachable_alert_raised = True
+        assert hub.unreachable_alert_raised is True
+        hub.client.unreachable_alert_raised = False
+        assert hub.unreachable_alert_raised is False
+
+
 class TestRefreshTokenPersistence:
     """Tests that rotated refresh tokens get written to entry.data."""
 
@@ -273,6 +413,55 @@ class TestRefreshTokenPersistence:
         new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
         assert CONF_PASSWORD not in new_data
         assert new_data[CONF_REFRESH_TOKEN] == "same-token"
+
+    def test_persist_keeps_password_when_kept(self):
+        """An entry whose owner ticked the box keeps its password on rotation."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "old-token",
+                CONF_PASSWORD: "kept-password",
+                CONF_KEEP_PASSWORD: True,
+            }
+        )
+
+        hub._persist_refresh_token("rotated-token")
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert new_data[CONF_REFRESH_TOKEN] == "rotated-token"
+        assert new_data[CONF_PASSWORD] == "kept-password"
+        assert new_data[CONF_KEEP_PASSWORD] is True
+
+    def test_persist_does_not_rewrite_a_current_kept_entry(self):
+        """A kept password does not make an unchanged token look out of date."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "same-token",
+                CONF_PASSWORD: "kept-password",
+                CONF_KEEP_PASSWORD: True,
+            }
+        )
+
+        hub._persist_refresh_token("same-token")
+
+        hub.hass.config_entries.async_update_entry.assert_not_called()
+
+    def test_persist_scrubs_password_when_box_unticked(self):
+        """A password beside an unticked box is scrubbed like a legacy one."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "same-token",
+                CONF_PASSWORD: "stray-password",
+                CONF_KEEP_PASSWORD: False,
+            }
+        )
+
+        hub._persist_refresh_token("same-token")
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert CONF_PASSWORD not in new_data
 
     def test_never_writes_into_an_entry_signed_in_to_another_account(self, caplog):
         """Reconfigure can move the entry this session saves to onto another
@@ -508,6 +697,150 @@ class TestLogin:
         await hub.login()
 
         hub.client.login.assert_awaited_once()
+
+    @_REFUSALS
+    async def test_setup_refusal_with_kept_password_signs_in_with_password(
+        self, make_refusal
+    ):
+        """A refusal at setup is followed by a password sign-in in the same
+        attempt when the user kept the password, and is remembered so setup
+        still counts it if that sign-in fails."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        refusal = make_refusal()
+        hub.client.refresh_token = AsyncMock(side_effect=refusal)
+        hub.client.login = AsyncMock()
+
+        await hub.login()
+
+        hub.client.login.assert_awaited_once()
+        assert hub.last_login_refusal == dead_refresh_token_signal(refusal)
+        assert hub.last_login_refusal is not None
+
+    @_REFUSALS
+    async def test_setup_refusal_without_kept_password_raises(self, make_refusal):
+        """A password held only in memory is not spent on a setup refusal."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = False
+        refusal = make_refusal()
+        hub.client.refresh_token = AsyncMock(side_effect=refusal)
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError) as raised:
+            await hub.login()
+
+        assert raised.value is refusal
+        hub.client.login.assert_not_awaited()
+        assert hub.last_login_refusal is None
+
+    @pytest.mark.parametrize(
+        "rejection",
+        [
+            pytest.param(login_rejected_error(), id="wrong-password"),
+            pytest.param(AccountBlockedError("blocked"), id="blocked"),
+            pytest.param(TwoFactorRequiredError("sms code"), id="sms-code"),
+        ],
+    )
+    async def test_setup_rejected_kept_password_is_not_tried_again(self, rejection):
+        """Verisure blocks an account after three failed sign-ins: a kept
+        password it rejects at setup is dropped from the (possibly shared)
+        client, so the next login on it makes no sign-in."""
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock(side_effect=rejection)
+
+        with pytest.raises(type(rejection)):
+            await hub.login()
+        assert hub.client.password == ""
+        assert hub.client.password_kept is False
+
+        with pytest.raises(VerisureOwaError):
+            await hub.login()
+        hub.client.login.assert_awaited_once()
+
+    async def test_setup_rejection_spares_a_password_swapped_in_meanwhile(self):
+        """Only the password that was sent is dropped: one put in place while
+        the sign-in was waiting for its answer stays."""
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "old-password"
+        hub.client.password_kept = True
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        rejected = MagicMock()
+        hub.client._on_kept_password_rejected = rejected
+
+        async def rejected_after_swap():
+            await asyncio.sleep(0)
+            hub.client.password = "new-password"
+            raise login_rejected_error()
+
+        hub.client.login = AsyncMock(side_effect=rejected_after_swap)
+
+        with pytest.raises(AuthenticationError):
+            await hub.login()
+        rejected.assert_called_once_with("old-password")
+        assert hub.client.password == "new-password"
+        assert hub.client.password_kept is True
+
+    async def test_setup_kept_password_failing_transiently_is_kept(self):
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "refused-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        hub.client.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+        hub.client.login = AsyncMock(side_effect=APIConnectionError("reset"))
+
+        with pytest.raises(APIConnectionError):
+            await hub.login()
+        assert hub.client.password == "hunter2"
+        assert hub.client.password_kept is True
+
+    async def test_setup_rejected_password_after_genuine_refresh_rejection_is_dropped(
+        self,
+    ):
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = "dead-refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        genuine = VerisureOwaError("Invalid session")
+        genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        hub.client.refresh_token = AsyncMock(side_effect=genuine)
+        hub.client.login = AsyncMock(side_effect=login_rejected_error())
+
+        with pytest.raises(AuthenticationError):
+            await hub.login()
+        assert hub.client.password == ""
+
+    async def test_plain_password_login_keeps_the_password_when_rejected(self):
+        """The setup dialog's own sign-in (no saved sign-in yet) keeps the
+        password: an SMS code request is answered by signing in again with it."""
+        hub = make_hub(mock_client=False)
+        hub.client.refresh_token_value = None
+        hub.client.password = "hunter2"
+        hub.client.login = AsyncMock(side_effect=TwoFactorRequiredError("sms"))
+
+        with pytest.raises(TwoFactorRequiredError):
+            await hub.login()
+        assert hub.client.password == "hunter2"
+
+    async def test_last_login_refusal_resets_on_each_login(self):
+        hub = make_hub()
+        hub.client.refresh_token_value = "refresh-token"
+        hub.client.password = "hunter2"
+        hub.client.password_kept = True
+        hub.last_login_refusal = "err 4"
+        hub.client.refresh_token = AsyncMock(return_value=True)
+
+        await hub.login()
+
+        assert hub.last_login_refusal is None
 
 
 # ── arm_alarm / disarm_alarm tests ──────────────────────────────────────────

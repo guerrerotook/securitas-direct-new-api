@@ -29,6 +29,7 @@ from custom_components.securitas.coordinators import (
     LockData,
     SentinelCoordinator,
     SentinelData,
+    _handle_session_expired,
 )
 from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
@@ -39,6 +40,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     WAFBlockedError,
 )
+from custom_components.securitas.verisure_owa_api.http_transport import HttpTransport
 from custom_components.securitas.verisure_owa_api.models import (
     ActivityCategory,
     ActivityEvent,
@@ -52,7 +54,12 @@ from custom_components.securitas.verisure_owa_api.models import (
     ThumbnailResponse,
 )
 
-from .conftest import make_installation
+from .conftest import (
+    LOGIN_SERVER_FAULTS,
+    LOGIN_WRONG_PASSWORD,
+    login_error_reply,
+    make_installation,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +90,7 @@ def _make_client() -> AsyncMock:
     client = AsyncMock(spec=VerisureOwaClient)
     client.protom_response = ""
     client.password = "test-password"
+    client.password_kept = False
     return client
 
 
@@ -541,6 +549,40 @@ class TestAlarmCoordinator:
             await coord._async_update_data()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("fault", [*LOGIN_SERVER_FAULTS, "wrong-password"])
+    async def test_sign_in_server_fault_is_retried_not_reauth(self, fault):
+        """The client's sign-in, answered with a server fault, fails the poll
+        as a passing fault; a wrong password still asks to sign in again."""
+        reply = login_error_reply(
+            LOGIN_WRONG_PASSWORD
+            if fault == "wrong-password"
+            else LOGIN_SERVER_FAULTS[fault]
+        )
+        transport = AsyncMock(spec=HttpTransport)
+        transport.execute.return_value = reply
+        signing_in = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="secret",
+            device_id="dev",
+            uuid="uuid",
+            id_device_indigitall="",
+        )
+        with pytest.raises(VerisureOwaError) as caught:
+            await signing_in.login()
+        client = _make_client()
+        client.get_general_status.side_effect = caught.value
+
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        expected = ConfigEntryAuthFailed if fault == "wrong-password" else UpdateFailed
+        with pytest.raises(expected):
+            await coord._async_update_data()
+
+    @pytest.mark.asyncio
     async def test_session_expired_genuine_login_failure_raises_auth_failed(self):
         """A genuine auth failure on relogin raises ConfigEntryAuthFailed (reauth)."""
         hass = _make_hass()
@@ -555,6 +597,80 @@ class TestAlarmCoordinator:
         with pytest.raises(ConfigEntryAuthFailed):
             await coord._async_update_data()
         client.login.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_session_expired_rejected_password_is_dropped(self):
+        """The password the relogin used is dropped once Verisure rejects it,
+        so the next poll does not spend another sign-in on it."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        rejection = AuthenticationError("credentials rejected")
+        client.get_general_status.side_effect = SessionExpiredError("expired")
+        client.login.side_effect = rejection
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
+        client.forget_rejected_password.assert_called_once_with(
+            rejection, "test-password", kept=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_expired_rejection_names_the_password_sent(self):
+        """The rejection is of the password the relogin sent, not one put in
+        place while it waited for Verisure's answer."""
+        hass = _make_hass()
+        client = _make_client()
+        client.password = "old-password"
+        client.password_kept = True
+        rejection = AuthenticationError("credentials rejected")
+
+        async def rejected_after_swap():
+            client.password = "new-password"
+            client.password_kept = False
+            raise rejection
+
+        client.get_general_status.side_effect = SessionExpiredError("expired")
+        client.login.side_effect = rejected_after_swap
+
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
+        client.forget_rejected_password.assert_called_once_with(
+            rejection, "old-password", kept=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_session_expired_relogins_spend_one_sign_in(self):
+        """Coordinators sharing the client relogin one at a time, so a
+        password Verisure rejects is sent once, not once per coordinator."""
+        client = _make_client()
+        client.renewal_lock = asyncio.Lock()
+
+        async def rejected():
+            await asyncio.sleep(0)
+            raise AuthenticationError("credentials rejected")
+
+        client.login.side_effect = rejected
+        client.forget_rejected_password = MagicMock(
+            side_effect=lambda *_args, **_kwargs: setattr(client, "password", "")
+        )
+
+        results = await asyncio.gather(
+            _handle_session_expired(client, SessionExpiredError("expired")),
+            _handle_session_expired(client, SessionExpiredError("expired")),
+            return_exceptions=True,
+        )
+
+        client.login.assert_awaited_once()
+        assert sorted(type(r).__name__ for r in results) == [
+            "ConfigEntryAuthFailed",
+            "UpdateFailed",
+        ]
 
     @pytest.mark.asyncio
     async def test_session_expired_transient_login_failure_raises_update_failed(self):

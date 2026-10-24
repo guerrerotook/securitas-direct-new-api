@@ -295,3 +295,31 @@ class TestRefreshCrashRecruitmentWarning:
             await client.refresh_token()
 
         assert "#568" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param({"data": {"status": 503}}, id="status-503"),
+            pytest.param({"name": "TimeoutError"}, id="timeout-name"),
+            pytest.param({"data": {"err": "TimeoutError"}}, id="timeout-code"),
+            pytest.param({"data": {"err": "60067"}}, id="err-60067"),
+        ],
+    )
+    async def test_crash_that_is_not_a_refusal_does_not_recruit(
+        self, mock_transport, caplog, extra
+    ) -> None:
+        """A crash that also carries a server fault or a genuine credential
+        failure is not Verisure refusing the saved sign-in, so no Repairs notice
+        will follow: the warning, which promises one, stays silent."""
+        response = refresh_crash_response()
+        response["errors"][0].update(extra)
+        mock_transport.execute.return_value = response
+        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
+
+        with (
+            caplog.at_level(logging.WARNING, logger=_BASE_LOGGER),
+            pytest.raises(VerisureOwaError),
+        ):
+            await client.refresh_token()
+
+        assert "#568" not in caplog.text
