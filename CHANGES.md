@@ -16,11 +16,6 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 ### Fixed
 
 - **Signing in with your password during a fault at Verisure's end was taken for a wrong password** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): when Verisure times out or has a server error while the integration signs in with your password, the integration now treats it as a passing problem and tries again, instead of saying your password is wrong and asking you to sign in again. The setup dialog says it can't connect rather than "invalid credentials".
-
-## v5.9.4
-
-### Fixed
-
 - **No notice when Verisure kept refusing the saved sign-in with "Il y a eu une erreur. Veuillez réessayer ultérieurement."** ([#652](https://github.com/guerrerotook/securitas-direct-new-api/issues/652)): Verisure can refuse to renew the saved sign-in with an error that says "try again later" and keep doing so for hours, while its own apps still work. The integration took this for a short outage, so it retried in silence and your devices stayed unavailable until you signed in again yourself. It is now handled like the other refusals fixed in 5.9.3: after 15 minutes a notice in **Settings → Repairs** tells you, and explains how to sign in again from the entry's **⋮** menu with **Reconfigure**. The notice clears itself once Verisure accepts the sign-in again. Thanks to [@dfischer0](https://github.com/dfischer0) for the report and the log.
 
 ## v5.9.3
