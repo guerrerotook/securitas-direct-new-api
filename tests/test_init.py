@@ -65,6 +65,7 @@ from custom_components.securitas import (
     _new_session_record,
     _options_are_authoritative,
     _raise_sign_in_issue,
+    _replace_account_session,
     _store_installations_cache,
     _sync_kept_password,
     _synced_entry_data,
@@ -4935,6 +4936,41 @@ class TestKeptPasswordSync:
 
         self._assert_forgotten_but_ticked(home)
         assert office.data[CONF_PASSWORD] == "new-password"
+
+    async def test_rejection_answered_to_a_replaced_session_spares_the_password(
+        self, hass
+    ):
+        """Reconfigure signs in again with the same password and replaces the
+        account's session while the old session's sign-in still waits for its
+        answer. Verisure asking that old sign-in for an SMS code says nothing
+        about the password the new sign-in just saved, so it stays."""
+        home, office, _ = self._ticked_pair_and_other_account(hass)
+        old = self._refused_hub(hass, home, None)
+        self._session(hass, old, home.entry_id, office.entry_id)
+        in_flight = asyncio.Event()
+        answer = asyncio.Event()
+
+        async def login():
+            in_flight.set()
+            await answer.wait()
+            raise TwoFactorRequiredError("2FA required")
+
+        old.client.login = AsyncMock(side_effect=login)
+        sign_in = asyncio.create_task(old.client._check_authentication_token())
+        await asyncio.wait_for(in_flight.wait(), 2)
+        new = make_hub(mock_client=False)
+        new.hass = hass
+        new.client.password = "kept-password"
+        new.client.password_kept = True
+        _replace_account_session(hass, self.USERNAME, new)
+        answer.set()
+
+        with pytest.raises(TwoFactorRequiredError):
+            await sign_in
+
+        assert home.data[CONF_PASSWORD] == "kept-password"
+        assert office.data[CONF_PASSWORD] == "kept-password"
+        assert new.client.password == "kept-password"
 
     async def test_rejection_answered_after_a_new_password_arrived_spares_it(
         self, hass

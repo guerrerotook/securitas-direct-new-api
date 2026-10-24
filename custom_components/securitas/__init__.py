@@ -992,6 +992,7 @@ def _replace_account_session(
     registered = _new_session_record(hub)
     if (retired := sessions.get(username)) is not None:
         retired["hub"].config_entry = None
+        retired["hub"].replaced = True
         flow_holds = {
             holder
             for holder in retired["holders"]

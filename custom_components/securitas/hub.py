@@ -249,6 +249,8 @@ class VerisureHub:
         """Initialize the Verisure OWA hub."""
         self.config = domain_config
         self.config_entry: ConfigEntry | None = config_entry
+        # Set once a newer sign-in replaces this hub as the account's session.
+        self.replaced = False
         self.country: str = domain_config[CONF_COUNTRY].upper()
         api_domains = ApiDomains()
         self.lang: str = api_domains.get_language(self.country)
@@ -790,7 +792,12 @@ class VerisureHub:
 
         The box stays ticked: the sign-in the user is asked for next keeps the
         new password.
+
+        A replaced hub leaves them alone: the newer sign-in may have saved the
+        same password, and Verisure's answer to this one does not judge it.
         """
+        if self.replaced:
+            return
         username = self.client.username
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             if (
