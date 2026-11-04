@@ -3,7 +3,7 @@ name: Nightly (latest deps)
 # Runs the repo's checks against the LATEST upstream dependencies (Home
 # Assistant stable, beta and dev, the test harness, HACS/hassfest) on a daily
 # schedule. This is an early-warning system for breakage introduced by new HA
-# releases, kept SEPARATE from PR CI (tests.yaml / validate.yaml) which pin/range their deps.
+# releases, kept SEPARATE from PR CI (tests.yaml / validate.yaml).
 on:
   schedule:
     - cron: "41 4 * * *"
@@ -35,8 +35,7 @@ jobs:
         with:
           # Match the dev, beta and stable channels in tests.yaml: the latest HA line
           # (2026.3+) requires 3.14, so the "latest deps" lane must run here
-          # too — on 3.13 pip would silently cap HA at the newest 3.13-compatible
-          # release instead of the actual latest.
+          # too.
           python-version: "3.14"
 
       - name: Install latest dependencies

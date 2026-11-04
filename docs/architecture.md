@@ -1104,6 +1104,7 @@ Tests are organized by module, with a shared `conftest.py` providing fixtures an
 tests/
 ├── conftest.py                     Shared fixtures (API client, JWT helpers, response factories)
 ├── fixtures/                       Sanitised API responses and capability JWTs used by the tests
+├── ha_harness.py                   One import path for the HA test helpers, on old and new HA
 ├── mock_graphql.py                 Mock GraphQL server for integration tests (see below)
 ├── test_alarm_panel.py             Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
 ├── test_api_queue.py               ApiQueue priority, throttling, arrival order, cancellation
@@ -1115,6 +1116,7 @@ tests/
 ├── test_camera_platform.py         Camera entity platform setup and image serving
 ├── test_capabilities.py            Capability JWT decoding and detection helpers
 ├── test_card_cache_busting.py      Card modules' relative imports carry the imported file's content stamp
+├── test_ci_ha_install.py           scripts/ci_ha_install.py: version picking, and the check that a CI job got the HA it asked for
 ├── test_client_activity.py         VerisureOwaClient activity timeline (xSActV2)
 ├── test_client_alarm.py            VerisureOwaClient alarm operations: arm, disarm, check_alarm, polling
 ├── test_client_auth.py             VerisureOwaClient auth lifecycle, typed execute, polling, headers
@@ -1150,7 +1152,8 @@ tests/
 ├── test_refresh_crash_behaviour.py Client handling of the xSRefreshLogin crash (#557)
 ├── test_refresh_diagnostics.py     Logging that tells apart the causes of the #557 crash
 ├── test_responses.py               Pydantic response envelopes: validation, null safety
-└── test_services.py                VerisureOwaClient installations, service catalog, sentinel and air quality, OTP, logout
+├── test_services.py                VerisureOwaClient installations, service catalog, sentinel and air quality, OTP, logout
+└── test_tests_workflow_install.py  tests.yaml: which steps of a beta or dev job may fail, and that the coverage gate reads only stable
 ```
 
 ### Key fixtures (`conftest.py`)
@@ -1252,14 +1255,14 @@ These jobs run in parallel on every PR and push to main:
 1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
 2. **Pyright** — `pyright custom_components/` for static type checking
 3. **Pylint** — `pylint custom_components/securitas/`
-4. **Tests** — eight jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on four Home Assistant channels. `scripts/ci_ha_install.py` installs `stable`, `beta` and `dev` (Home Assistant from the `main` branch), and fails if it does not end up on the version it asked for. Those three use `pytest-homeassistant` on HA 2026.11 and newer, and `pytest-homeassistant-custom-component` on older HA; tests import the helpers from `tests/ha_harness.py`, which works with either. A failed install or a test failure on `beta` or `dev` is only a warning, so an unreleased HA cannot block a PR; after a failed install the job skips the steps that need it. `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
+4. **Tests** — eight jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on four Home Assistant channels. `scripts/ci_ha_install.py` installs `stable`, `beta` and `dev` (Home Assistant from its `dev` branch), and fails if it does not end up on the version it asked for. Those three use `pytest-homeassistant` on HA 2026.11 and newer, and `pytest-homeassistant-custom-component` on older HA; tests import the helpers from `tests/ha_harness.py`, which works with either. A failed install or a test failure on `beta` or `dev` is only a warning, and the system package install, the version print and the coverage upload may fail there too, so an unreleased HA cannot block a PR; after a failed install the job skips the steps that need it. `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
 
 Once the test jobs finish, the **Coverage gate** combines the `stable` unit and integration coverage and fails below 90%.
 
 ### Nightly workflow (`.github/workflows/nightly.yml`)
 
 A scheduled run (cron `41 4 * * *`, plus `workflow_dispatch`) exercises the repo
-against the **latest** upstream dependencies, separate from the pinned/ranged PR
+against the **latest** upstream dependencies, separate from PR
 CI. It runs the unit + integration suites on Home Assistant `stable`, `beta` and
 `dev`, installed by `scripts/ci_ha_install.py`, where any failure is a real one,
 and validates with hassfest + HACS

@@ -18,7 +18,7 @@
  * Card config:
  *   type: custom:securitas-alarm-card
  *   entity: alarm_control_panel.YOUR_PANEL_ID
- *   name: My Alarm          # optional — overrides friendly_name
+ *   name: My Alarm          # optional — overrides the entity's name
  */
 
 import { createTextField, escHtml, resolveEntityName } from "./verisure-owa-card-utils.js?v=40267799-5.11.0";

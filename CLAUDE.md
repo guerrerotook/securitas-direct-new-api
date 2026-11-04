@@ -38,7 +38,7 @@
     `python3 scripts/stamp_card_imports.py` and restart HA to serve the new
     entry-point URLs.
 - CI additionally runs pylint, the integration suite (`-m integration`) on the
-    stable, dev and minimum HA channels, and a combined 90% coverage gate.
+    stable, beta, dev and minimum HA channels, and a combined 90% coverage gate.
 - Before creating a PR run `ruff check .`, `ruff format .` and
     `pyright custom_components/`. Pyright needs Home Assistant 2026.10 or
     newer installed (a beta counts): from 2026.10, HA's type hints use the
