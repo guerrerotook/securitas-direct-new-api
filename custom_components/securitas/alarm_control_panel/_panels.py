@@ -54,18 +54,16 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._attr_name = f"Main - {self._installation.alias}"
+        self._attr_name = f"{self._installation.alias} Main"
 
     @property
     def suggested_object_id(self) -> str:
         """Force the entity_id slug to ``<alias>``, matching the v4 layout.
 
         With ``has_entity_name = False`` the default would slugify the friendly
-        name ``Main - <alias>`` and produce ``main_<alias>``, which both
-        breaks v4 dashboards and (when an old entity already occupies that
-        name) lands on the doubled-alias collision form. Returning the bare
-        installation alias here is what HA seeds the entity_id from on first
-        registration.
+        name ``<alias> Main`` and produce ``<alias>_main``, which breaks v4
+        dashboards. Returning the bare installation alias here is what HA
+        seeds the entity_id from on first registration.
         """
         return self._installation.alias
 
@@ -385,7 +383,7 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Interior - {self._installation.alias}"
+        self._attr_name = f"{self._installation.alias} Interior"
         # Seed _attr_supported_features so HA's cached_property mechanism
         # (and the entity registry's cached supported_features) start from
         # the current resolver state. The @property below stays authoritative
@@ -472,7 +470,7 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Perimeter - {self._installation.alias}"
+        self._attr_name = f"{self._installation.alias} Perimeter"
         self._recompute_supported_features()
 
     def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
@@ -533,7 +531,7 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Annex - {self._installation.alias}"
+        self._attr_name = f"{self._installation.alias} Annex"
         self._recompute_supported_features()
 
     def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:

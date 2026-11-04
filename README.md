@@ -120,9 +120,9 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 | | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming (advanced)](#force-arming-advanced). |
 | | Offer an auto-force-arm tick box in the alarm controls | No | Off by default. When enabled, the alarm's More Info dialog and a [Tile card](#tile-card) with **Alarm modes** and the **Verisure OWA Open Sensors** feature (and the deprecated alarm card) show a **"force-arm past open sensors"** tick box; with it ticked, an arm you start from the buttons next to it auto-forces past open doors/windows instead of waiting for you to confirm. The tick is remembered per device in the browser. Leave off where your panel doesn't support force-arming (Spain has been observed). See [Auto-force-arm tick box](#auto-force-arm-tick-box). |
-| **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
-| | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
-| | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
+| **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `<alias> Perimeter` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
+| | Enable Annex-only panel | No | Adds an `<alias> Annex` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
+| | Enable Interior-only panel | No | Adds an `<alias> Interior` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
 | **Activity Log and Events** | Poll the activity log once per minute in the background | No | Off by default: the log refreshes on demand from the card, and remote events (someone arming at the panel, an intrusion, a power cut) don't fire on the `verisure_owa_activity` bus. Turn it on if you want every event to fire — see [How often it refreshes](#how-often-it-refreshes). |
 | **Sign-in** _(only while the box is ticked)_ | Keep my password so the integration can sign in again by itself | Yes | Untick and save to delete the stored password at once, without signing in. To keep it again, use **Reconfigure**. See [Keeping your password](#keeping-your-password). |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
@@ -199,13 +199,13 @@ If the alarm enters a Verisure state you haven't mapped (e.g. perimeter is armed
 
 ## Sub-panels
 
-The default setup gives you one alarm panel per installation: `Main - <alias>`, driven by the Home / Away / Night / Vacation / Custom mappings. That works for almost everyone.
+The default setup gives you one alarm panel per installation: `<alias> Main`, driven by the Home / Away / Night / Vacation / Custom mappings. That works for almost everyone.
 
 If your installation has more than one alarm circuit (interior, perimeter, annex), you can opt into a dedicated panel for each circuit under **Configure**:
 
-- **Interior-only** (`Interior - <alias>`) — Home / Away / Night / Disarmed.
-- **Perimeter-only** (`Perimeter - <alias>`) — Armed Away / Disarmed. Only offered when perimeter sensors are detected.
-- **Annex-only** (`Annex - <alias>`) — Armed Away / Disarmed. Only offered when an annex zone is detected.
+- **Interior-only** (`<alias> Interior`) — Home / Away / Night / Disarmed.
+- **Perimeter-only** (`<alias> Perimeter`) — Armed Away / Disarmed. Only offered when perimeter sensors are detected.
+- **Annex-only** (`<alias> Annex`) — Armed Away / Disarmed. Only offered when an annex zone is detected.
 
 The Interior toggle appears whenever any sibling circuit exists; otherwise the main panel already does the same job. If perimeter or annex isn't detected automatically, [enable debug logging](#reporting-issues) and share the `capability detection for ...` line in a bug report.
 
