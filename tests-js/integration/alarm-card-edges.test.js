@@ -86,6 +86,43 @@ describe("alarm-card name + language fallbacks", () => {
     expect(card.shadowRoot.querySelector(".entity-name").textContent).toBe("Home Main");
   });
 
+  it("shows a new name when only the name Home Assistant builds changes", () => {
+    const entity = makeAlarmEntity({ state: "disarmed", friendlyName: "Main" });
+    const states = { [ENTITY]: entity };
+    const card = mountAlarmCard({
+      hass: makeHass({ formatEntityName: () => "Main", states }),
+    });
+    expect(card.shadowRoot.querySelector(".entity-name").textContent).toBe("Main");
+
+    card.hass = makeHass({ formatEntityName: () => "Home Main", states });
+
+    expect(card.shadowRoot.querySelector(".entity-name").textContent).toBe("Home Main");
+  });
+
+  it("keeps a half-typed disarm code when only the name changes", () => {
+    const entity = makeAlarmEntity({
+      state: "armed_away",
+      codeFormat: "number",
+      friendlyName: "Main",
+    });
+    const states = { [ENTITY]: entity };
+    const card = mountAlarmCard({
+      hass: makeHass({ formatEntityName: () => "Main", states }),
+    });
+    Array.from(card.shadowRoot.querySelectorAll("button"))
+      .find((b) => /Disarm/i.test(b.textContent))
+      .click();
+    card.shadowRoot.querySelector('[data-key="1"]').click();
+    card.shadowRoot.querySelector('[data-key="2"]').click();
+    expect(card.shadowRoot.querySelector(".pin-label")).not.toBeNull();
+
+    card.hass = makeHass({ formatEntityName: () => "Home Main", states });
+
+    expect(card.shadowRoot.querySelector(".entity-name").textContent).toBe("Home Main");
+    expect(card.shadowRoot.querySelector(".pin-label")).not.toBeNull();
+    expect(card.shadowRoot.querySelector("input").value).toBe("12");
+  });
+
   it("keeps a configured name when Home Assistant builds names", () => {
     const entity = makeAlarmEntity({ state: "disarmed" });
     const card = mountAlarmCard({

@@ -216,19 +216,27 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Act on a pending auto-force intent before the render short-circuit, so a
     // freshly-appeared force-arm context is handled even on the same tick.
     this._maybeAutoForceArm(stateObj);
-    const newKey = stateObj
+    const name = stateObj ? this._resolveName(stateObj) : "";
+    const stateKey = stateObj
       ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
       : "missing";
+    const newKey = `${stateKey}|${name}`;
     if (newKey !== this._lastKey) {
+      // A rename alone must not throw away a PIN the user is typing.
+      const renamedOnly = this._lastKey?.startsWith(`${stateKey}|`);
       this._lastKey = newKey;
       // If alarm just armed/disarmed, go back to normal UI
-      if (stateObj && stateObj.state !== "disarmed" && this._uiState === "pin") {
+      if (!renamedOnly && stateObj && stateObj.state !== "disarmed" && this._uiState === "pin") {
         this._resetUI();
       }
       this._render();
     }
   }
 
+
+  _resolveName(stateObj) {
+    return resolveEntityName(this._hass, stateObj, this._config.name || undefined) || this._config.entity;
+  }
 
   // ── UI state helpers ────────────────────────────────────────────────────────
   _resetUI() {
@@ -265,7 +273,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     const attrs    = stateObj.attributes;
     const stateCfg = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
     const cfg      = { icon: stateCfg.icon, color: this._getColor(state), label: _t(lang, STATE_LABEL_KEYS[state] || state) };
-    const name     = resolveEntityName(this._hass, stateObj, this._config.name || undefined) || this._config.entity;
+    const name     = this._resolveName(stateObj);
     const features = attrs.supported_features || 0;
 
     const forceArmAvailable = attrs.force_arm_available === true;
