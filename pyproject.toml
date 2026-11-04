@@ -1,4 +1,5 @@
 [tool.pytest.ini_options]
+addopts = "-p no:respx"
 asyncio_mode = "auto"
 markers = [
     "integration: test exercises an external surface (HA core or mock_graphql). Auto-applied by conftest.pytest_collection_modifyitems based on imports/fixtures.",

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
@@ -35,6 +34,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
+from tests.ha_harness import MockConfigEntry
 
 from .conftest import (
     login_rejected_error,

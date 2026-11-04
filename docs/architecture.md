@@ -1193,7 +1193,7 @@ await alarm.async_alarm_arm_away()
 assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 ```
 
-**Config flow tests** (test_config_flow): Use the `hass` fixture from `pytest-homeassistant-custom-component` and HA's flow manager API:
+**Config flow tests** (test_config_flow): Use the `hass` fixture from HA's pytest plugin and HA's flow manager API:
 
 ```python
 result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -1252,7 +1252,7 @@ These jobs run in parallel on every PR and push to main:
 1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
 2. **Pyright** — `pyright custom_components/` for static type checking
 3. **Pylint** — `pylint custom_components/securitas/`
-4. **Tests** — six jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on three Home Assistant channels. `dev` installs the newest `pytest-homeassistant-custom-component`, pre-releases included, and the Home Assistant it pins; `stable` installs the newest release that `requirements_test.txt` allows, and the Home Assistant that release pins, which can be a beta; `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
+4. **Tests** — eight jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on four Home Assistant channels. `scripts/ci_ha_install.py` installs `stable`, `beta` and `dev` (Home Assistant from the `main` branch), and fails the job if it does not end up on the version it asked for. Those three use `pytest-homeassistant` on HA 2026.11 and newer, and `pytest-homeassistant-custom-component` on older HA; tests import the helpers from `tests/ha_harness.py`, which works with either. A test failure on `beta` or `dev` is only a warning, so an unreleased HA cannot block a PR. `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
 
 Once the test jobs finish, the **Coverage gate** combines the `stable` unit and integration coverage and fails below 90%.
 
@@ -1260,8 +1260,9 @@ Once the test jobs finish, the **Coverage gate** combines the `stable` unit and 
 
 A scheduled run (cron `41 4 * * *`, plus `workflow_dispatch`) exercises the repo
 against the **latest** upstream dependencies, separate from the pinned/ranged PR
-CI. It installs the newest Home Assistant core + `pytest-homeassistant-custom-component`
-and runs the unit + integration suites, and validates with hassfest + HACS
+CI. It runs the unit + integration suites on Home Assistant `stable`, `beta` and
+`dev`, installed by `scripts/ci_ha_install.py`, where any failure is a real one,
+and validates with hassfest + HACS
 against current HA. This is an early-warning system for breakage from new HA
 releases; it does not gate PRs. All other CI/validation/release workflows live
 alongside it under `.github/workflows/`.

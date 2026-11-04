@@ -138,7 +138,7 @@ class TestVerisureCamera:
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
         """Camera is the primary entity of its device -- no name suffix is set."""
-        from homeassistant.helpers.entity import UNDEFINED
+        from homeassistant.helpers.typing import UNDEFINED
 
         from custom_components.securitas.camera import VerisureCamera
 

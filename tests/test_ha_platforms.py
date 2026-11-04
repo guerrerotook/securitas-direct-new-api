@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN, _build_config_dict
 from custom_components.securitas import entity as entity_mod
@@ -50,6 +49,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     SmartLockModeStatus,
 )
 from tests.conftest import make_config_entry_data
+from tests.ha_harness import MockConfigEntry
 
 # ---------------------------------------------------------------------------
 # Helper factories

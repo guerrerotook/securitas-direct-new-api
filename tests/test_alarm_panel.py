@@ -20,7 +20,6 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as _er_for_feature_detect
 from homeassistant.helpers.entity_registry import DeletedRegistryEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.alarm_control_panel import (
     AnnexVerisureOwaAlarmPanel,
@@ -70,6 +69,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     OperationStatus,
     SStatus,
 )
+from tests.ha_harness import MockConfigEntry
 
 
 class TestNewArmingExceptionEventConstants:

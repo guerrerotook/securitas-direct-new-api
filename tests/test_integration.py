@@ -20,10 +20,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_fire_time_changed,
-)
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
 from custom_components.securitas.alarm_control_panel import (
@@ -39,6 +35,10 @@ from custom_components.securitas.const import (
 from custom_components.securitas.lock import VerisureLock
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
+)
+from tests.ha_harness import (
+    MockConfigEntry,
+    async_fire_time_changed,
 )
 
 from .conftest import make_config_entry_data, refresh_response

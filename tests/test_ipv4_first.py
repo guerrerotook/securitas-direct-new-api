@@ -19,13 +19,13 @@ import aiohttp
 import pytest
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN
 from custom_components.securitas.verisure_owa_api.exceptions import (
     APIConnectionError,
     AuthenticationError,
 )
+from tests.ha_harness import MockConfigEntry
 
 
 @pytest.fixture(autouse=True)
