@@ -1096,6 +1096,31 @@ pylint custom_components/securitas/
 
 Pyright needs Home Assistant 2026.10 or newer installed: from 2026.10, HA's type hints name the classes of probatio (the library HA 2026.9+ runs in place of voluptuous), so schemas the integration builds fail to type-check against older releases.
 
+### Running the tests locally
+
+`requirements_test.txt` installs neither Home Assistant nor the plugin that lets pytest test against it. `scripts/ci_ha_install.py` installs both, the way CI does, and exits non-zero if Home Assistant does not end up on the version it asked for. CI also installs the TurboJPEG system library, so have that first: `brew install jpeg-turbo` on macOS, `sudo apt-get install libturbojpeg0-dev` on Debian or Ubuntu.
+
+Python tests, in a new Python 3.14 environment:
+
+```bash
+python3.14 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+python scripts/ci_ha_install.py stable --requirements requirements_test.txt
+python -m pytest tests/
+```
+
+Card tests, on Node 20 or newer:
+
+```bash
+npm ci
+npm test
+```
+
+Use `beta` or `dev` in place of `stable` to test those Home Assistant channels. Each channel gets its own new environment.
+
+Always start from a new environment rather than upgrading one in place. The install does not remove anything, so an older environment keeps `pytest-homeassistant-custom-component` beside `pytest-homeassistant`, and with both installed pytest stops before it collects any tests.
+
 ### Test architecture
 
 Tests are organized by module, with a shared `conftest.py` providing fixtures and helpers.
