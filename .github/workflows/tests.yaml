@@ -89,10 +89,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies (stable, beta, dev)
+        id: install
         if: matrix.ha-channel != 'minimum'
+        # An unreleased HA must not block a PR, even when it will not install. The
+        # later steps check for failure, not success, because on minimum this step
+        # is skipped.
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         run: |
           pip install --upgrade pip
-          # Fails the job if a later install moves HA off the version it asked for.
+          # Fails if a later install moves HA off the version it asked for.
           python scripts/ci_ha_install.py "${{ matrix.ha-channel }}" \
             --requirements requirements_test.txt
 
@@ -105,11 +110,17 @@ jobs:
           # coverage etc. that conflict with the ~= ranges in requirements_test.txt
           pip install pytest-homeassistant-custom-component==0.13.210 pytest-cov PyJWT~=2.10 PyTurboJPEG~=1.7
 
+      - name: Warn when an unreleased Home Assistant cannot be installed
+        if: steps.install.outcome == 'failure'
+        run: echo "::warning::Could not install Home Assistant ${{ matrix.ha-channel }}"
+
       - name: Show Home Assistant version
+        if: steps.install.outcome != 'failure'
         run: python -c "from homeassistant.const import __version__; print(__version__)"
 
       - name: Run ${{ matrix.suite }} tests with coverage
         id: pytest
+        if: steps.install.outcome != 'failure'
         # An unreleased HA must not block a PR. This sits on the step because
         # job-level continue-on-error still fails a required check.
         continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
@@ -132,6 +143,7 @@ jobs:
         run: echo "::warning::${{ matrix.suite }} tests failed on Home Assistant ${{ matrix.ha-channel }}"
 
       - name: Upload coverage data
+        if: steps.install.outcome != 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.ha-channel }}-${{ matrix.suite }}
