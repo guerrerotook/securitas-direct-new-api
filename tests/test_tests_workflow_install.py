@@ -1,4 +1,4 @@
-"""A failed Home Assistant install on `beta` or `dev` warns instead of failing.
+"""A failure on `beta` or `dev` does not fail the job, and a failed install warns.
 
 An unreleased Home Assistant must not block a PR, and that includes a GitHub
 outage or the install landing on the wrong version. These tests pin how
@@ -30,6 +30,16 @@ def test_only_unreleased_channels_tolerate_a_failed_install() -> None:
     install = next(step for step in _steps() if step.get("id") == "install")
     assert "scripts/ci_ha_install.py" in install["run"]
     assert install["continue-on-error"] == "${{ " + _TOLERATED + " }}"
+
+
+def test_other_fallible_steps_tolerate_failure_on_unreleased_channels() -> None:
+    for name in (
+        "Install system dependencies",
+        "Show Home Assistant version",
+        "Run ${{ matrix.suite }} tests",
+        "Upload coverage data",
+    ):
+        assert _named(name)["continue-on-error"] == "${{ " + _TOLERATED + " }}", name
 
 
 def test_a_failed_install_warns() -> None:

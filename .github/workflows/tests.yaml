@@ -82,6 +82,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install system dependencies
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         run: sudo apt-get update && sudo apt-get install -y libturbojpeg0-dev
 
       - uses: actions/setup-python@v6
@@ -116,6 +117,7 @@ jobs:
 
       - name: Show Home Assistant version
         if: steps.install.outcome != 'failure'
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         run: python -c "from homeassistant.const import __version__; print(__version__)"
 
       - name: Run ${{ matrix.suite }} tests with coverage
@@ -144,6 +146,7 @@ jobs:
 
       - name: Upload coverage data
         if: steps.install.outcome != 'failure'
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.ha-channel }}-${{ matrix.suite }}
@@ -167,7 +170,7 @@ jobs:
       - run: pip install coverage
 
       # Gate on the stable channel only — code is identical across channels,
-      # so running the gate 3x would just multiply CI minutes for no signal.
+      # so running the gate on each would just multiply CI minutes for no signal.
       - name: Download unit coverage (stable)
         uses: actions/download-artifact@v8
         with:
