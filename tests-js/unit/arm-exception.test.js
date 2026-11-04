@@ -841,12 +841,61 @@ describe("AutoForceTickBox (the tick box shared by More Info and the Tile)", () 
 
     expect(box.ticked).toBe(true);
     expect(box.field.hidden).toBe(false);
-    expect(box.field.getAttribute("label")).toBe("Automatically force-arm past open sensors");
+    expect(box.field.textContent).toBe("Automatically force-arm past open sensors");
     expect(box.checkbox.checked).toBe(true);
     expect(other.ticked).toBe(false);
     expect(other.checkbox.checked).toBe(false);
     box.disconnect();
     other.disconnect();
+  });
+
+  it("shows its label on any Home Assistant, without ha-formfield", () => {
+    const box = tickBoxFor(ENTITY);
+
+    expect(box.field.localName).toBe("div");
+    expect(box.field.className).toBe("auto-force-toggle");
+    expect(box.checkbox.className).toBe("auto-force-checkbox");
+    expect(box.checkbox.getAttribute("aria-label")).toBe(
+      "Automatically force-arm past open sensors",
+    );
+    expect(box.field.querySelector("ha-formfield")).toBeNull();
+    // A <label> around a form-associated checkbox would toggle it a second time.
+    expect(box.field.querySelector("label")).toBeNull();
+    box.disconnect();
+  });
+
+  it("one click on the label flips the box exactly once", () => {
+    const box = tickBoxFor(ENTITY);
+    const heard = vi.fn();
+    window.addEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+    document.body.appendChild(box.field);
+    const label = box.field.querySelector("span");
+
+    label.click();
+    expect(box.checkbox.checked).toBe(true);
+    expect(box.ticked).toBe(true);
+    expect(localStorage.getItem(`verisure-owa:auto-force-arm:${ENTITY}`)).toBe("true");
+    expect(heard).toHaveBeenCalledTimes(1);
+
+    label.click();
+    expect(box.checkbox.checked).toBe(false);
+    expect(box.ticked).toBe(false);
+    expect(heard).toHaveBeenCalledTimes(2);
+
+    window.removeEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+    box.field.remove();
+    box.disconnect();
+  });
+
+  it("a label click for no alarm saves nothing", () => {
+    const box = new AutoForceTickBox(CONTROL);
+    const heard = vi.fn();
+    window.addEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+
+    box.field.querySelector("span").click();
+
+    window.removeEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+    expect(heard).not.toHaveBeenCalled();
   });
 
   it("is offered only while disarmed with the capability gate on", () => {

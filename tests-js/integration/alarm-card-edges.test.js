@@ -3,7 +3,7 @@
 // always satisfied with explicit values (gesture defaults, language/name
 // fallbacks, optional config keys, empty stub data, etc.).
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import "../../custom_components/securitas/www/verisure-owa-alarm-card.js";
 // The chip/badge live in their own module (a separate Lovelace resource in
 // production); import it so those elements are defined under test.
@@ -75,6 +75,27 @@ describe("alarm-card name + language fallbacks", () => {
       }),
     });
     expect(card.shadowRoot.innerHTML).toContain("Front Door");
+  });
+
+  it("shows the name Home Assistant builds for the entity", () => {
+    const formatEntityName = vi.fn(() => "Home Main");
+    const entity = makeAlarmEntity({ state: "disarmed", friendlyName: "Main" });
+    const card = mountAlarmCard({
+      hass: makeHass({ formatEntityName, states: { [ENTITY]: entity } }),
+    });
+    expect(card.shadowRoot.querySelector(".entity-name").textContent).toBe("Home Main");
+  });
+
+  it("keeps a configured name when Home Assistant builds names", () => {
+    const entity = makeAlarmEntity({ state: "disarmed" });
+    const card = mountAlarmCard({
+      config: { name: "My Alarm" },
+      hass: makeHass({
+        formatEntityName: (_stateObj, name) => name,
+        states: { [ENTITY]: entity },
+      }),
+    });
+    expect(card.shadowRoot.querySelector(".entity-name").textContent).toBe("My Alarm");
   });
 
   it("falls back to entity_id when neither config.name nor friendly_name is set", () => {

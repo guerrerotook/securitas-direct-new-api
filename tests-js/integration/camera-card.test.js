@@ -320,6 +320,31 @@ describe("verisure-owa-camera-card-editor name field", () => {
     expect(captured?.name).toBe("Main Door");
   });
 
+  it("uses ha-input for the name where Home Assistant has it", () => {
+    const get = vi.spyOn(customElements, "get");
+    get.mockImplementation((tag) => (tag === "ha-input" ? class {} : undefined));
+    const editor = document.createElement("verisure-owa-camera-card-editor");
+    editor.setConfig({ entity: "camera.front_door" });
+    editor.hass = makeHass({
+      states: { "camera.front_door": makeCameraEntity() },
+      entities: { "camera.front_door": { platform: "securitas" } },
+    });
+    document.body.appendChild(editor);
+    get.mockRestore();
+    let captured = null;
+    editor.addEventListener("config-changed", (e) => {
+      captured = e.detail.config;
+    });
+
+    const nameField = editor.shadowRoot.querySelector("ha-input");
+    expect(nameField).not.toBeNull();
+    expect(editor.shadowRoot.querySelector("ha-textfield")).toBeNull();
+    expect(editor.shadowRoot.querySelector("style").textContent).toMatch(/ha-input/);
+    nameField.value = "Main Door";
+    nameField.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(captured?.name).toBe("Main Door");
+  });
+
   it("removes the name key when the textfield is cleared", () => {
     const editor = document.createElement("verisure-owa-camera-card-editor");
     editor.setConfig({ entity: "camera.front_door", name: "Old" });
