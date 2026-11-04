@@ -5,8 +5,9 @@ Usage:
     python scripts/ci_ha_install.py {stable,beta,dev}
         [--requirements FILE ...] [--extra PKG ...]
 
-The job fails if it does not end up on the version it asked for, because a
-later install can silently replace Home Assistant with another version.
+The script exits non-zero if it does not end up on the version it asked for,
+because a later install can silently replace Home Assistant with another version.
+The calling workflow decides whether that blocks the job.
 """
 
 import argparse
