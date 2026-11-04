@@ -4,6 +4,16 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.11.0
 
+### Added
+
+- **Install from the Home Assistant Marketplace**: from Home Assistant 2026.11, the Marketplace replaces HACS. Go to **Settings > Marketplace** and search for Verisure OWA. If you installed with HACS, you don't need to do anything: the Marketplace takes over when you update Home Assistant, and Verisure OWA keeps getting updates. HACS is still the way to install on Home Assistant 2026.10 or older.
+
+### Fixed
+
+- **The card editors lost their text fields on Home Assistant 2026.11**: the name field of the alarm and camera card editors, and the perform-action fields of the alarm card editor, did not appear. They are back, and work the same on older versions.
+- **The force-arm tick box lost its label on Home Assistant 2026.11**: the auto-force-arm tick box in More Info and on the Tile showed no text. It now shows its label on every version, and clicking the label ticks the box.
+- **Alarm panels showed the installation name twice**: a panel appeared as `Home Main - Home`. Panels are now called `Home Main`, `Home Interior`, `Home Perimeter` and `Home Annex`. Your entity IDs do not change, and neither does a name you set yourself. The alarm card shows the new name too, unless you gave the card its own.
+
 ## v5.10.0
 
 ### Added

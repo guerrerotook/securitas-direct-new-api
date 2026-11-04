@@ -1,6 +1,6 @@
 # Verisure OWA
 
-[![HACS Default](https://img.shields.io/badge/HACS-Default-blue.svg)](https://github.com/hacs/integration)
+[![Marketplace or HACS](https://img.shields.io/badge/Marketplace%20or%20HACS-Default-blue.svg)](#installation)
 [![GitHub Release](https://img.shields.io/github/v/release/guerrerotook/securitas-direct-new-api)](https://github.com/guerrerotook/securitas-direct-new-api/releases)
 [![Active Installations](https://img.shields.io/badge/dynamic/json?url=https://analytics.home-assistant.io/custom_integrations.json&label=Active%20Installations&query=$.securitas.total&color=blue)](https://analytics.home-assistant.io/)
 [![License: Apache 2.0](https://img.shields.io/github/license/guerrerotook/securitas-direct-new-api?color=blue)](LICENSE)
@@ -38,16 +38,26 @@ Multiple installations per account work out of the box. 2FA is handled at setup.
 
 ## Installation
 
-### HACS (recommended)
+[![Open your Home Assistant instance and open this repository.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=guerrerotook&repository=securitas-direct-new-api)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=guerrerotook&repository=securitas-direct-new-api)
+This link works on every Home Assistant version. It opens the Marketplace on 2026.11 or newer, and HACS on 2026.10 or older.
 
-Or manually:
+### Home Assistant 2026.11 or newer
+
+Verisure OWA is in the **Marketplace**, which comes with Home Assistant, so there is nothing else to install first.
+
+1. Go to **Settings > Marketplace**. The first time you open it, Home Assistant warns you that community projects are not reviewed by the Home Assistant project, and you need to accept that before you can install anything.
+2. Search for **Verisure OWA** and open it.
+3. Select **Install**. The setup page normally opens when the installation finishes. If it doesn't, restart Home Assistant.
+
+### Home Assistant 2026.10 or older
+
+Verisure OWA is in the **HACS** default list.
 
 1. [Install HACS](https://www.hacs.xyz/docs/use/download/download/) if you don't have it already.
 2. Open the HACS dashboard in Home Assistant.
 3. Search for **Verisure OWA**.
-4. Click download.
+4. Click download, then restart Home Assistant.
 
 ## Setup
 
