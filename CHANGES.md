@@ -13,6 +13,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 - **The card editors lost their text fields on Home Assistant 2026.11** ([#659](https://github.com/guerrerotook/securitas-direct-new-api/pull/659)): the name field of the alarm and camera card editors, and the perform-action fields of the alarm card editor, did not appear. They are back, and work the same on older versions.
 - **The force-arm tick box lost its label on Home Assistant 2026.11** ([#659](https://github.com/guerrerotook/securitas-direct-new-api/pull/659)): the auto-force-arm tick box in More Info and on the Tile showed no text. It now shows its label on every version, and clicking the label ticks the box.
 - **Alarm panels showed the installation name twice** ([#659](https://github.com/guerrerotook/securitas-direct-new-api/pull/659)): a panel appeared as `Home Main - Home`. Panels are now called `Home Main`, `Home Interior`, `Home Perimeter` and `Home Annex`. Your entity IDs do not change, and neither does a name you set yourself. The alarm card shows the new name too, unless you gave the card its own.
+- **Some Verisure OWA actions failed unless you picked individual entities** ([#661](https://github.com/guerrerotook/securitas-direct-new-api/pull/661)): **Refresh alarm**, **Capture image**, **Refresh activity log** and **Fetch activity image** failed with an error when you targeted an area, device, floor or label, or used an `exclude` block on Home Assistant 2026.11. They now work with all of these, and an excluded entity is left out.
 
 ## v5.10.0
 

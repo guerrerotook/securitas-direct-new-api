@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import hashlib
+import importlib
 import logging
 import os
 import time
@@ -11,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.const import (
     CONF_DEVICE_ID,
@@ -20,7 +22,12 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
 
@@ -71,6 +78,8 @@ from custom_components.securitas import (
     async_setup_entry,
     async_unload_entry,
     async_update_options,
+    register_service_aliases,
+    register_v5_entity_services,
 )
 from custom_components.securitas.const import API_CACHE_TTL, CONF_KEEP_PASSWORD
 from custom_components.securitas.hub import (
@@ -3665,6 +3674,204 @@ class TestServiceTargetCompatibility:
 
         assert result == {"alarm_control_panel.home"}
         extract.assert_awaited_once_with(call)
+
+
+# ===========================================================================
+# Targeting of the verisure_owa.* entity services
+# ===========================================================================
+
+
+def _ha_has_target_exclude() -> bool:
+    try:
+        target = importlib.import_module("homeassistant.helpers.target")
+    except ImportError:
+        return False
+    return hasattr(target, "async_extract_excluded_entity_ids")
+
+
+_HAS_TARGET_EXCLUDE = _ha_has_target_exclude()
+
+
+class _FakeEntity:
+    """Has the signatures of the real entity methods, so stray keywords raise."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def async_set_context(self, context) -> None:
+        pass
+
+    async def async_manual_refresh(self) -> None:
+        self.calls.append({})
+
+    async def async_fetch_image(self, id_signal: str, signal_type: str) -> dict:
+        self.calls.append({"id_signal": id_signal, "signal_type": signal_type})
+        return {"image_b64": "encoded", "mime_type": "image/jpeg"}
+
+
+class _FakeComponent:
+    def __init__(self, entities: dict[str, _FakeEntity]) -> None:
+        self._entities = entities
+
+    def get_entity(self, entity_id: str) -> _FakeEntity | None:
+        return self._entities.get(entity_id)
+
+
+def _setup_two_entities_in_an_area(
+    hass, domain: str
+) -> tuple[str, list[str], dict[str, _FakeEntity]]:
+    """Return the area id, the two entity ids and their fake entities."""
+    registry = er.async_get(hass)
+    area_id = ar.async_get(hass).async_create("Hall").id
+    entities: dict[str, _FakeEntity] = {}
+    for unique_id in ("one", "two"):
+        entry = registry.async_get_or_create(domain, "securitas", unique_id)
+        registry.async_update_entity(entry.entity_id, area_id=area_id)
+        entities[entry.entity_id] = _FakeEntity()
+        hass.states.async_set(entry.entity_id, "disarmed")
+    hass.data[domain] = _FakeComponent(entities)
+    register_v5_entity_services(hass)
+    return area_id, list(entities), entities
+
+
+class TestRefreshAlarmTargets:
+    """A service with no fields of its own reaches only the targeted entities."""
+
+    async def _call(self, hass, target: dict) -> None:
+        await hass.services.async_call(
+            "verisure_owa", "refresh_alarm", {}, target=target, blocking=True
+        )
+
+    async def test_entity_target_reaches_only_that_entity(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "alarm_control_panel")
+
+        await self._call(hass, {"entity_id": ids[0]})
+
+        assert entities[ids[0]].calls == [{}]
+        assert entities[ids[1]].calls == []
+
+    async def test_area_target_reaches_every_entity_in_the_area(self, hass):
+        area_id, ids, entities = _setup_two_entities_in_an_area(
+            hass, "alarm_control_panel"
+        )
+
+        await self._call(hass, {"area_id": area_id})
+
+        assert entities[ids[0]].calls == [{}]
+        assert entities[ids[1]].calls == [{}]
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_excluded_entity_is_left_out(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "alarm_control_panel")
+
+        await self._call(hass, {"entity_id": ids, "exclude": {"entity_id": [ids[1]]}})
+
+        assert entities[ids[0]].calls == [{}]
+        assert entities[ids[1]].calls == []
+
+
+class TestFetchActivityImageTargets:
+    """A service with real fields keeps them, whatever the target."""
+
+    FIELDS = {"id_signal": "42", "signal_type": "16"}
+
+    async def _call(self, hass, target: dict) -> dict:
+        return await hass.services.async_call(
+            "verisure_owa",
+            "fetch_activity_image",
+            dict(self.FIELDS),
+            target=target,
+            blocking=True,
+            return_response=True,
+        )
+
+    async def test_entity_target_passes_the_real_fields(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "sensor")
+
+        response = await self._call(hass, {"entity_id": ids[0]})
+
+        assert entities[ids[0]].calls == [self.FIELDS]
+        assert entities[ids[1]].calls == []
+        assert set(response) == {ids[0]}
+
+    async def test_area_target_passes_the_real_fields(self, hass):
+        area_id, ids, entities = _setup_two_entities_in_an_area(hass, "sensor")
+
+        response = await self._call(hass, {"area_id": area_id})
+
+        assert entities[ids[0]].calls == [self.FIELDS]
+        assert entities[ids[1]].calls == [self.FIELDS]
+        assert set(response) == set(ids)
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_excluded_entity_is_left_out_and_real_fields_arrive(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "sensor")
+
+        response = await self._call(
+            hass, {"entity_id": ids, "exclude": {"entity_id": [ids[1]]}}
+        )
+
+        assert entities[ids[0]].calls == [self.FIELDS]
+        assert entities[ids[1]].calls == []
+        assert set(response) == {ids[0]}
+
+
+class _ForceArmPanel(Entity):
+    _attr_should_poll = False
+
+    def __init__(self, name: str) -> None:
+        self._attr_unique_id = name
+        self._attr_name = name
+        self.codes: list[str | None] = []
+
+    async def async_force_arm(self, code: str | None = None) -> None:
+        self.codes.append(code)
+
+
+class TestAliasedServiceTargets:
+    """Exclusion through the verisure_owa.* alias of a securitas.* service."""
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_aliased_service_honours_exclude(self, hass):
+        """The verisure_owa.* alias forwards ``exclude`` to the securitas.* service."""
+        platform = EntityPlatform(
+            hass=hass,
+            logger=logging.getLogger(__name__),
+            domain="alarm_control_panel",
+            platform_name="securitas",
+            platform=None,
+            scan_interval=timedelta(seconds=30),
+            entity_namespace=None,
+        )
+        kept, excluded = _ForceArmPanel("kept"), _ForceArmPanel("excluded")
+        await platform.async_add_entities([kept, excluded])
+        platform.async_register_entity_service(
+            "force_arm", {vol.Optional("code"): cv.string}, "async_force_arm"
+        )
+        register_service_aliases(hass)
+
+        await hass.services.async_call(
+            "verisure_owa",
+            "force_arm",
+            {"code": "1234"},
+            target={
+                "entity_id": [kept.entity_id, excluded.entity_id],
+                "exclude": {"entity_id": [excluded.entity_id]},
+            },
+            blocking=True,
+        )
+
+        assert kept.codes == ["1234"]
+        assert excluded.codes == []
 
 
 # ===========================================================================

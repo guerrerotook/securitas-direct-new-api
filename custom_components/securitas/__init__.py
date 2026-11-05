@@ -70,6 +70,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.service import (
     async_extract_entity_ids,
     async_set_service_schema,
+    remove_entity_service_fields,
 )
 
 from .api_queue import ApiQueue
@@ -1471,7 +1472,7 @@ def _register_verisure_owa_entity_service(
                 f"dispatch verisure_owa.{service_name}"
             )
         entity_ids = await _async_extract_service_entity_ids(call)
-        method_kwargs = {k: v for k, v in call.data.items() if k != "entity_id"}
+        method_kwargs = remove_entity_service_fields(call)
         responses: dict[str, Any] = {}
         for eid in entity_ids:
             entity = component.get_entity(eid)
