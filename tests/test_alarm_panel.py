@@ -20,7 +20,6 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as _er_for_feature_detect
 from homeassistant.helpers.entity_registry import DeletedRegistryEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.alarm_control_panel import (
     AnnexVerisureOwaAlarmPanel,
@@ -70,6 +69,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     OperationStatus,
     SStatus,
 )
+from tests.ha_harness import MockConfigEntry
 
 
 class TestNewArmingExceptionEventConstants:
@@ -1323,10 +1323,10 @@ class TestSetArmState:
 class TestProperties:
     """Tests for simple property accessors."""
 
-    def test_name_returns_main_prefixed_alias(self):
-        """Combined (main) panel name is 'Main - <installation alias>'."""
+    def test_name_returns_alias_then_main(self):
+        """Combined (main) panel name is '<installation alias> Main'."""
         alarm = make_alarm()
-        assert alarm.name == "Main - Home"
+        assert alarm.name == "Home Main"
 
     def test_code_format_none_when_no_code(self):
         """code_format is None when no code is configured."""
@@ -8077,10 +8077,9 @@ class TestExecutePartialDisarm:
 class TestCombinedPanelEntityId:
     """The combined panel must suggest `<alias>` as its entity-id slug.
 
-    Without this, HA would use the friendly-name 'Main - <alias>' to slugify
-    the entity_id and end up with `alarm_control_panel.main_<alias>` (or, in
-    the documented breakage from registry collision recovery,
-    `<alias>_main_<alias>`). Forcing the slug to `<alias>` matches the v4
+    Without this, HA would use the friendly name '<alias> Main' to slugify
+    the entity_id and end up with `alarm_control_panel.<alias>_main`. Forcing
+    the slug to `<alias>` matches the v4
     entity_id and means dashboards keep working through a fresh v5 setup.
     """
 
@@ -8090,9 +8089,81 @@ class TestCombinedPanelEntityId:
         # when generating the entity_id for a fresh install.
         assert alarm.suggested_object_id == alarm.installation.alias
 
-    def test_combined_panel_friendly_name_keeps_main_prefix(self):
+    def test_combined_panel_friendly_name_starts_with_the_alias(self):
         alarm = make_alarm()
-        assert alarm.name.startswith("Main - ")
+        assert alarm.name == "Home Main"
+
+
+class TestPanelNames:
+    """Each panel's name starts with the alias, which is also the device name.
+
+    HA 2026.11 shows the device name in front of an entity's name unless the
+    entity's name already starts with it.
+    """
+
+    @pytest.mark.parametrize(
+        "panel_factory,expected",
+        [
+            (_make_interior_panel, "TestHome Interior"),
+            (_make_perimeter_panel, "TestHome Perimeter"),
+            (_make_annex_panel, "TestHome Annex"),
+        ],
+    )
+    def test_sub_panel_name(self, panel_factory, expected):
+        assert panel_factory().name == expected
+
+    @pytest.mark.parametrize(
+        "panel_factory,old_prefix",
+        [
+            (make_alarm, "Main"),
+            (_make_interior_panel, "Interior"),
+            (_make_perimeter_panel, "Perimeter"),
+            (_make_annex_panel, "Annex"),
+        ],
+    )
+    async def test_upgrade_in_place_keeps_the_entity_id(
+        self, hass, panel_factory, old_prefix
+    ):
+        """An entity registered under the old name keeps its entity_id."""
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.const import DOMAIN
+
+        panel = panel_factory()
+        alias = panel._installation.alias
+        entry = MockConfigEntry(domain=DOMAIN, data={"unsupported_commands": []})
+        entry.add_to_hass(hass)
+        device = dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "v4_securitas_direct.12345")},
+            name=alias,
+            manufacturer="Verisure",
+        )
+        slug_source = (
+            {"object_id_base": panel.suggested_object_id, "suggested_object_id": None}
+            if _HAS_OBJECT_ID_BASE_KWARG
+            else {"suggested_object_id": panel.suggested_object_id}
+        )
+        ent_reg = er.async_get(hass)
+
+        def register(name):
+            return ent_reg.async_get_or_create(
+                "alarm_control_panel",
+                DOMAIN,
+                panel.unique_id,
+                has_entity_name=panel.has_entity_name,
+                original_name=name,
+                device_id=device.id,
+                config_entry=entry,
+                **slug_source,
+            )
+
+        before = register(f"{old_prefix} - {alias}")
+        after = register(panel.name)
+
+        assert after.entity_id == before.entity_id
+        assert after.original_name == panel.name
 
 
 # ===========================================================================

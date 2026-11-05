@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import pytest
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.const import DOMAIN
 from custom_components.securitas.migrate_unique_ids import (
     canonical_unique_id,
     migrate_unique_ids,
 )
+from tests.ha_harness import MockConfigEntry
 
 
 class TestCanonicalUniqueId:

@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements_test.txt pylint
+          pip install homeassistant -r requirements_test.txt pylint
 
       - name: Pylint
         run: pylint custom_components/securitas/
@@ -55,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements_test.txt pyright
+          pip install homeassistant -r requirements_test.txt pyright
 
       - name: Pyright
         run: pyright custom_components/
@@ -66,12 +66,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # dev + stable run on the current Python (3.14, required by HA 2026.3+).
-        # The minimum channel pins HA 2025.2.0, whose phcc only supports 3.13,
-        # so it stays on 3.13 to keep proving our declared floor still works.
+        # dev, beta and stable run on the current Python (3.14, required by HA
+        # 2026.3+). The minimum channel pins HA 2025.2.0, whose phcc only supports
+        # 3.13, so it stays on 3.13 to keep proving our declared floor still works.
         include:
           - { ha-channel: dev, suite: unit, python-version: "3.14" }
           - { ha-channel: dev, suite: integration, python-version: "3.14" }
+          - { ha-channel: beta, suite: unit, python-version: "3.14" }
+          - { ha-channel: beta, suite: integration, python-version: "3.14" }
           - { ha-channel: stable, suite: unit, python-version: "3.14" }
           - { ha-channel: stable, suite: integration, python-version: "3.14" }
           - { ha-channel: minimum, suite: unit, python-version: "3.13" }
@@ -80,19 +82,25 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install system dependencies
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         run: sudo apt-get update && sudo apt-get install -y libturbojpeg0-dev
 
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies (stable)
-        if: matrix.ha-channel == 'stable'
+      - name: Install dependencies (stable, beta, dev)
+        id: install
+        if: matrix.ha-channel != 'minimum'
+        # An unreleased HA must not block a PR, even when it will not install. The
+        # later steps check for failure, not success, because on minimum this step
+        # is skipped.
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         run: |
           pip install --upgrade pip
-          # Installs the newest phcc release requirements_test.txt allows; phcc pins
-          # one exact HA version, which can be a beta. Just install normally.
-          pip install -r requirements_test.txt
+          # Fails if a later install moves HA off the version it asked for.
+          python scripts/ci_ha_install.py "${{ matrix.ha-channel }}" \
+            --requirements requirements_test.txt
 
       - name: Install dependencies (minimum)
         if: matrix.ha-channel == 'minimum'
@@ -103,14 +111,21 @@ jobs:
           # coverage etc. that conflict with the ~= ranges in requirements_test.txt
           pip install pytest-homeassistant-custom-component==0.13.210 pytest-cov PyJWT~=2.10 PyTurboJPEG~=1.7
 
-      - name: Install dependencies (dev)
-        if: matrix.ha-channel == 'dev'
-        run: |
-          pip install --upgrade pip
-          python -m pip install --pre pytest-homeassistant-custom-component
-          pip install -r requirements_test.txt
+      - name: Warn when an unreleased Home Assistant cannot be installed
+        if: steps.install.outcome == 'failure'
+        run: echo "::warning::Could not install Home Assistant ${{ matrix.ha-channel }}"
+
+      - name: Show Home Assistant version
+        if: steps.install.outcome != 'failure'
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
+        run: python -c "from homeassistant.const import __version__; print(__version__)"
 
       - name: Run ${{ matrix.suite }} tests with coverage
+        id: pytest
+        if: steps.install.outcome != 'failure'
+        # An unreleased HA must not block a PR. This sits on the step because
+        # job-level continue-on-error still fails a required check.
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         env:
           # parallel=true in pyproject.toml suffixes the data file per process;
           # COVERAGE_FILE pins the base so artifacts upload cleanly.
@@ -125,13 +140,20 @@ jobs:
             -m "$MARKER" \
             --cov --cov-report=term-missing --no-cov-on-fail
 
+      - name: Warn when an unreleased Home Assistant fails the suite
+        if: steps.pytest.outcome == 'failure'
+        run: echo "::warning::${{ matrix.suite }} tests failed on Home Assistant ${{ matrix.ha-channel }}"
+
       - name: Upload coverage data
+        if: steps.install.outcome != 'failure'
+        continue-on-error: ${{ matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.ha-channel }}-${{ matrix.suite }}
           path: .coverage.${{ matrix.ha-channel }}.${{ matrix.suite }}*
           include-hidden-files: true
-          if-no-files-found: error
+          # A beta or dev run that crashed leaves no data, and must not block a PR.
+          if-no-files-found: ${{ (matrix.ha-channel == 'beta' || matrix.ha-channel == 'dev') && 'warn' || 'error' }}
           retention-days: 1
 
   coverage-gate:
@@ -148,7 +170,7 @@ jobs:
       - run: pip install coverage
 
       # Gate on the stable channel only — code is identical across channels,
-      # so running the gate 3x would just multiply CI minutes for no signal.
+      # so running the gate on each would just multiply CI minutes for no signal.
       - name: Download unit coverage (stable)
         uses: actions/download-artifact@v8
         with:

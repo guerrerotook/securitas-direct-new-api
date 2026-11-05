@@ -1,6 +1,7 @@
 {
     "domain": "securitas",
     "name": "Verisure OWA",
+    "categories": ["security_safety.alarm_systems"],
     "codeowners": [
         "@guerrerotook"
     ],

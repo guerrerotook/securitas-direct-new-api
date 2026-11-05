@@ -89,6 +89,25 @@ describe("verisure-owa-alarm-card-editor name field", () => {
     expect(captured?.name).toBe("My Panel");
   });
 
+  it("uses ha-input for its text fields where Home Assistant has it", () => {
+    const get = vi.spyOn(customElements, "get");
+    get.mockImplementation((tag) => (tag === "ha-input" ? class {} : undefined));
+    const editor = mountEditor();
+    get.mockRestore();
+    let captured = null;
+    editor.addEventListener("config-changed", (e) => {
+      captured = e.detail.config;
+    });
+
+    const nameField = editor.shadowRoot.querySelector("#name-slot ha-input");
+    expect(nameField).not.toBeNull();
+    expect(editor.shadowRoot.querySelectorAll("ha-textfield").length).toBe(0);
+    expect(editor.shadowRoot.querySelector("style").textContent).toMatch(/ha-input/);
+    nameField.value = "My Panel";
+    nameField.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(captured?.name).toBe("My Panel");
+  });
+
   it("clearing the name field removes the name key from the config", () => {
     const editor = document.createElement("verisure-owa-alarm-card-editor");
     editor.setConfig({ entity: "alarm_control_panel.x", name: "Old" });

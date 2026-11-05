@@ -299,9 +299,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature, wrapper } = mountTile();
 
       expect(toggle(feature)).not.toBeNull();
-      expect(toggle(feature).getAttribute("label")).toBe(
-        "Automatically force-arm past open sensors",
-      );
+      expect(toggle(feature).textContent).toBe("Automatically force-arm past open sensors");
       expect(checkbox(feature).localName).toBe("ha-checkbox");
       expect(feature.hidden).toBe(false);
       expect(wrapper.hidden).toBe(false);
@@ -388,7 +386,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature } = mountTile();
       feature.hass = makeHass({ language: "es", states: { [ENTITY]: alarmEntity() } });
 
-      expect(toggle(feature).getAttribute("label")).toBe(
+      expect(toggle(feature).textContent).toBe(
         "Forzar armado automáticamente con sensores abiertos",
       );
     });
@@ -397,9 +395,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature } = mountTile();
       feature.hass = makeHass({ language: "ca", states: { [ENTITY]: alarmEntity() } });
 
-      expect(toggle(feature).getAttribute("label")).toBe(
-        "Força l’armat automàticament amb sensors oberts",
-      );
+      expect(toggle(feature).textContent).toBe("Força l’armat automàticament amb sensors oberts");
     });
   });
 

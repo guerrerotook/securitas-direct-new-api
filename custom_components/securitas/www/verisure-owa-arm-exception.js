@@ -319,16 +319,25 @@ export class AutoForceTickBox {
     this._ticked = false;
     this._key = null;
 
-    this.field = document.createElement("ha-formfield");
+    this.field = document.createElement("div");
     this.field.className = "auto-force-toggle";
     this.field.hidden = true;
     this.checkbox = document.createElement("ha-checkbox");
     this.checkbox.className = "auto-force-checkbox";
-    this.field.appendChild(this.checkbox);
+    // Not a <label>: wrapping a form-associated checkbox would toggle it twice.
+    this.label = document.createElement("span");
+    this.field.append(this.checkbox, this.label);
+    // _onSaved hears this write and takes the new tick.
+    const save = () => {
+      if (this._entityId) writeAutoForce(this._entityId, this.checkbox.checked === true);
+    };
     this.checkbox.addEventListener("change", (event) => {
       event.stopPropagation();
-      // _onSaved hears this write and takes the new tick.
-      if (this._entityId) writeAutoForce(this._entityId, this.checkbox.checked === true);
+      save();
+    });
+    this.label.addEventListener("click", () => {
+      this.checkbox.checked = !this.checkbox.checked;
+      save();
     });
 
     this._onSaved = (event) => {
@@ -402,7 +411,9 @@ export class AutoForceTickBox {
     this._key = key;
     this.field.hidden = !show;
     if (show) {
-      this.field.setAttribute("label", armExceptionTranslation(lang, "auto_force_arm"));
+      const label = armExceptionTranslation(lang, "auto_force_arm");
+      this.label.textContent = label;
+      this.checkbox.setAttribute("aria-label", label);
       this.checkbox.checked = this._ticked;
     }
     return show;

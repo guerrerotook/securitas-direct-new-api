@@ -1,9 +1,9 @@
 name: Nightly (latest deps)
 
 # Runs the repo's checks against the LATEST upstream dependencies (Home
-# Assistant, the test harness, HACS/hassfest) on a daily schedule. This is an
-# early-warning system for breakage introduced by new HA releases, kept
-# SEPARATE from PR CI (tests.yaml / validate.yaml) which pin/range their deps.
+# Assistant stable, beta and dev, the test harness, HACS/hassfest) on a daily
+# schedule. This is an early-warning system for breakage introduced by new HA
+# releases, kept SEPARATE from PR CI (tests.yaml / validate.yaml).
 on:
   schedule:
     - cron: "41 4 * * *"
@@ -23,6 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        ha-channel: [stable, beta, dev]
         suite: [unit, integration]
     steps:
       - uses: actions/checkout@v5
@@ -32,25 +33,22 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          # Match the dev/stable channel in tests.yaml: the latest HA line
+          # Match the dev, beta and stable channels in tests.yaml: the latest HA line
           # (2026.3+) requires 3.14, so the "latest deps" lane must run here
-          # too — on 3.13 pip would silently cap HA at the newest 3.13-compatible
-          # release instead of the actual latest.
+          # too.
           python-version: "3.14"
 
       - name: Install latest dependencies
         run: |
           pip install --upgrade pip
-          # Pull the newest HA core + custom-component test harness, ignoring the
-          # pinned/ranged versions in requirements_test.txt. Then install the
-          # repo's remaining test requirements (PyJWT, PyTurboJPEG, plugins) on
-          # top — pip keeps the already-upgraded HA/phcc unless a hard conflict
-          # forces otherwise.
-          pip install --upgrade homeassistant pytest-homeassistant-custom-component
-          pip install --upgrade -r requirements_test.txt
+          # Fails the job if a later install moves HA off the version it asked for.
+          python scripts/ci_ha_install.py "${{ matrix.ha-channel }}" \
+            --requirements requirements_test.txt
 
       - name: Show resolved versions
-        run: pip list
+        run: |
+          pip list
+          python -c "from homeassistant.const import __version__; print(__version__)"
 
       - name: Run ${{ matrix.suite }} tests
         run: |

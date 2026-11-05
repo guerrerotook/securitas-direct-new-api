@@ -23,10 +23,6 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_fire_time_changed,
-)
 
 import custom_components.securitas as securitas_init
 from custom_components.securitas import (
@@ -111,6 +107,10 @@ from tests.conftest import (
     refresh_token_rejected_err7_error,
     refresh_token_rejected_err99_error,
     refresh_token_rejected_error,
+)
+from tests.ha_harness import (
+    MockConfigEntry,
+    async_fire_time_changed,
 )
 from tests.test_hub import make_hub
 

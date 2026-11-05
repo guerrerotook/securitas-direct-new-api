@@ -903,8 +903,8 @@ A single debug log line at startup makes misdetection diagnosable: search the lo
 
 Per installation:
 
-- One **main panel** (always present) — friendly name `Main - <installation alias>`. Drives all three axes through the user-configurable `map_home`/`map_away`/`map_night`/`map_custom`/`map_vacation` mappings. Implementation class is `CombinedVerisureOwaAlarmPanel`; the user-facing term is "main panel" (contrasts with "Interior-only / Perimeter-only / Annex-only control panel"). Backwards compatible with all existing setups.
-- Up to three opt-in **sub-panels** (Interior, Perimeter, Annex) — friendly names `<Axis> - <installation alias>` (e.g. `Interior - <alias>`). Each drives a single axis. Visibility is gated on (a) capability detection, AND (b) the per-axis toggle in the options flow. The Perimeter and Annex toggles are hidden when their respective capability is absent. The Interior toggle is hidden only when the installation has neither perimeter nor annex capability — with no other axis available, the main panel already drives the interior axis and a separate Interior tile would just be noise. Once any second axis is supported, the Interior toggle is offered immediately (it does not depend on whether the sibling toggle is currently enabled).
+- One **main panel** (always present) — friendly name `<installation alias> Main`. Drives all three axes through the user-configurable `map_home`/`map_away`/`map_night`/`map_custom`/`map_vacation` mappings. Implementation class is `CombinedVerisureOwaAlarmPanel`; the user-facing term is "main panel" (contrasts with "Interior-only / Perimeter-only / Annex-only control panel"). Backwards compatible with all existing setups.
+- Up to three opt-in **sub-panels** (Interior, Perimeter, Annex) — friendly names `<installation alias> <Axis>` (e.g. `<alias> Interior`). Each drives a single axis. Visibility is gated on (a) capability detection, AND (b) the per-axis toggle in the options flow. The Perimeter and Annex toggles are hidden when their respective capability is absent. The Interior toggle is hidden only when the installation has neither perimeter nor annex capability — with no other axis available, the main panel already drives the interior axis and a separate Interior tile would just be noise. Once any second axis is supported, the Interior toggle is offered immediately (it does not depend on whether the sibling toggle is currently enabled).
 
 All four entities subscribe to the same `AlarmCoordinator`; commands from any entity update the joint `AlarmState`, and the coordinator update broadcasts new state to every entity. Sub-panel classes (`InteriorVerisureOwaAlarmPanel`, `PerimeterVerisureOwaAlarmPanel`, `AnnexVerisureOwaAlarmPanel`) inherit from `BaseVerisureOwaAlarmPanel` and override two hooks: `_resolve_target_state(ha_state)` projects an HA state onto the panel's axis (preserving the others), and `_extract_state(joint)` reads only the panel's axis from the joint state.
 
@@ -1096,6 +1096,31 @@ pylint custom_components/securitas/
 
 Pyright needs Home Assistant 2026.10 or newer installed: from 2026.10, HA's type hints name the classes of probatio (the library HA 2026.9+ runs in place of voluptuous), so schemas the integration builds fail to type-check against older releases.
 
+### Running the tests locally
+
+`requirements_test.txt` installs neither Home Assistant nor the plugin that lets pytest test against it. `scripts/ci_ha_install.py` installs both, the way CI does, and exits non-zero if Home Assistant does not end up on the version it asked for. CI also installs the TurboJPEG system library, so have that first: `brew install jpeg-turbo` on macOS, `sudo apt-get install libturbojpeg0-dev` on Debian or Ubuntu.
+
+Python tests, in a new Python 3.14 environment:
+
+```bash
+python3.14 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+python scripts/ci_ha_install.py stable --requirements requirements_test.txt
+python -m pytest tests/
+```
+
+Card tests, on Node 20 or newer:
+
+```bash
+npm ci
+npm test
+```
+
+Use `beta` or `dev` in place of `stable` to test those Home Assistant channels. Each channel gets its own new environment.
+
+Always start from a new environment rather than upgrading one in place. The install does not remove anything, so an older environment keeps `pytest-homeassistant-custom-component` beside `pytest-homeassistant`, and with both installed pytest stops before it collects any tests.
+
 ### Test architecture
 
 Tests are organized by module, with a shared `conftest.py` providing fixtures and helpers.
@@ -1104,6 +1129,7 @@ Tests are organized by module, with a shared `conftest.py` providing fixtures an
 tests/
 ├── conftest.py                     Shared fixtures (API client, JWT helpers, response factories)
 ├── fixtures/                       Sanitised API responses and capability JWTs used by the tests
+├── ha_harness.py                   One import path for the HA test helpers, on old and new HA
 ├── mock_graphql.py                 Mock GraphQL server for integration tests (see below)
 ├── test_alarm_panel.py             Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
 ├── test_api_queue.py               ApiQueue priority, throttling, arrival order, cancellation
@@ -1115,6 +1141,7 @@ tests/
 ├── test_camera_platform.py         Camera entity platform setup and image serving
 ├── test_capabilities.py            Capability JWT decoding and detection helpers
 ├── test_card_cache_busting.py      Card modules' relative imports carry the imported file's content stamp
+├── test_ci_ha_install.py           scripts/ci_ha_install.py: version picking, and the check that a CI job got the HA it asked for
 ├── test_client_activity.py         VerisureOwaClient activity timeline (xSActV2)
 ├── test_client_alarm.py            VerisureOwaClient alarm operations: arm, disarm, check_alarm, polling
 ├── test_client_auth.py             VerisureOwaClient auth lifecycle, typed execute, polling, headers
@@ -1150,7 +1177,8 @@ tests/
 ├── test_refresh_crash_behaviour.py Client handling of the xSRefreshLogin crash (#557)
 ├── test_refresh_diagnostics.py     Logging that tells apart the causes of the #557 crash
 ├── test_responses.py               Pydantic response envelopes: validation, null safety
-└── test_services.py                VerisureOwaClient installations, service catalog, sentinel and air quality, OTP, logout
+├── test_services.py                VerisureOwaClient installations, service catalog, sentinel and air quality, OTP, logout
+└── test_tests_workflow_install.py  tests.yaml: which steps of a beta or dev job may fail, and that the coverage gate reads only stable
 ```
 
 ### Key fixtures (`conftest.py`)
@@ -1193,7 +1221,7 @@ await alarm.async_alarm_arm_away()
 assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 ```
 
-**Config flow tests** (test_config_flow): Use the `hass` fixture from `pytest-homeassistant-custom-component` and HA's flow manager API:
+**Config flow tests** (test_config_flow): Use the `hass` fixture from HA's pytest plugin and HA's flow manager API:
 
 ```python
 result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -1252,16 +1280,17 @@ These jobs run in parallel on every PR and push to main:
 1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
 2. **Pyright** — `pyright custom_components/` for static type checking
 3. **Pylint** — `pylint custom_components/securitas/`
-4. **Tests** — six jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on three Home Assistant channels. `dev` installs the newest `pytest-homeassistant-custom-component`, pre-releases included, and the Home Assistant it pins; `stable` installs the newest release that `requirements_test.txt` allows, and the Home Assistant that release pins, which can be a beta; `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
+4. **Tests** — eight jobs: the unit suite (`-m "not integration"`) and the integration suite (`-m integration`), each on four Home Assistant channels. `scripts/ci_ha_install.py` installs `stable`, `beta` and `dev` (Home Assistant from its `dev` branch), and fails if it does not end up on the version it asked for. Those three use `pytest-homeassistant` on HA 2026.11 and newer, and `pytest-homeassistant-custom-component` on older HA; tests import the helpers from `tests/ha_harness.py`, which works with either. A failed install or a test failure on `beta` or `dev` is only a warning, and the system package install, the version print and the coverage upload may fail there too, so an unreleased HA cannot block a PR; after a failed install the job skips the steps that need it. `minimum` pins 2025.2.0, the floor declared in `hacs.json`, on Python 3.13.
 
 Once the test jobs finish, the **Coverage gate** combines the `stable` unit and integration coverage and fails below 90%.
 
 ### Nightly workflow (`.github/workflows/nightly.yml`)
 
 A scheduled run (cron `41 4 * * *`, plus `workflow_dispatch`) exercises the repo
-against the **latest** upstream dependencies, separate from the pinned/ranged PR
-CI. It installs the newest Home Assistant core + `pytest-homeassistant-custom-component`
-and runs the unit + integration suites, and validates with hassfest + HACS
+against the **latest** upstream dependencies, separate from PR
+CI. It runs the unit + integration suites on Home Assistant `stable`, `beta` and
+`dev`, installed by `scripts/ci_ha_install.py`, where any failure is a real one,
+and validates with hassfest + HACS
 against current HA. This is an early-warning system for breakage from new HA
 releases; it does not gate PRs. All other CI/validation/release workflows live
 alongside it under `.github/workflows/`.

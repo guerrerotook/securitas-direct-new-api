@@ -34,3 +34,31 @@ export function formatTranslation(lang, translations, key, vars) {
   }
   return v;
 }
+
+// Home Assistant 2026.11 removed ha-textfield in favour of ha-input. Both report
+// what was typed as `value` on the target of their `input` event.
+export function createTextField(label, value, placeholder) {
+  const tag = customElements.get("ha-input") ? "ha-input" : "ha-textfield";
+  const field = document.createElement(tag);
+  field.label = label;
+  field.value = value;
+  field.placeholder = placeholder;
+  return field;
+}
+
+export function resolveEntityName(hass, stateObj, configName) {
+  if (typeof hass?.formatEntityName === "function") {
+    try {
+      return hass.formatEntityName(stateObj, configName);
+    } catch (_) {
+      // Older/minimal HA clients may not expose all entity registries needed
+      // by structured entity-name configs. Fall back to the friendly name.
+    }
+  }
+  if (typeof configName === "string") return configName;
+  const nameItems = Array.isArray(configName) ? configName : configName ? [configName] : [];
+  if (nameItems.length && nameItems.every((item) => item?.type === "text")) {
+    return nameItems.map((item) => item.text || "").join(" ");
+  }
+  return stateObj.attributes.friendly_name || stateObj.entity_id;
+}

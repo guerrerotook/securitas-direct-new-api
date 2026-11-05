@@ -14,7 +14,7 @@
  *   name: Front Door   # optional — overrides the device name
  */
 
-import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js?v=a5e83573-5.11.0";
+import { createTextField, escHtml, formatTranslation } from "./verisure-owa-card-utils.js?v=40267799-5.11.0";
 
 // ── Translations ──────────────────────────────────────────────────────────────
 
@@ -197,7 +197,7 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-        ha-textfield { display: block; width: 100%; }
+        ha-input, ha-textfield { display: block; width: 100%; }
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
@@ -218,11 +218,12 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
       }
     });
 
-    // Name field — ha-textfield with input event (no value-changed → no re-render cycle)
-    const nameTf = document.createElement("ha-textfield");
-    nameTf.label = _t(lang, "editor_name");
-    nameTf.value = this._config.name || "";
-    nameTf.placeholder = _t(lang, "editor_name_placeholder");
+    // Name field — input event (no value-changed → no re-render cycle)
+    const nameTf = createTextField(
+      _t(lang, "editor_name"),
+      this._config.name || "",
+      _t(lang, "editor_name_placeholder"),
+    );
     nameTf.addEventListener("input", (e) => {
       const val = e.target.value;
       if (val.trim()) {

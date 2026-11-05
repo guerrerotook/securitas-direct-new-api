@@ -29,7 +29,6 @@ from homeassistant.data_entry_flow import FlowResultType, UnknownFlow, section
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
     _ALIASED_SERVICES,
@@ -105,6 +104,7 @@ from tests.conftest import (
     refresh_login_crash_error,
     refresh_token_rejected_response,
 )
+from tests.ha_harness import MockConfigEntry
 
 
 @pytest.fixture(autouse=True)

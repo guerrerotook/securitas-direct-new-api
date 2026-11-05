@@ -16,8 +16,9 @@ import {
   migrateCompactAlarmConfig,
   reportDeprecatedElement,
   TRANSLATIONS,
-} from "./verisure-owa-alarm-shared.js?v=af356362-5.11.0";
-import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=7a72e318-5.11.0";
+} from "./verisure-owa-alarm-shared.js?v=fc6e2696-5.11.0";
+import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=e76167ff-5.11.0";
+import { resolveEntityName } from "./verisure-owa-card-utils.js?v=40267799-5.11.0";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
@@ -69,9 +70,10 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
         align-items: center;
         box-sizing: border-box;
         min-height: var(--feature-height, 42px);
-        --mdc-typography-body2-font-size: var(--ha-font-size-s, 12px);
+        font-size: var(--ha-font-size-s, 12px);
       }
       .auto-force-toggle[hidden] { display: none; }
+      .auto-force-toggle span { cursor: pointer; }
     `;
     this._alert = document.createElement("verisure-owa-arm-exception-alert");
     this.shadowRoot.append(style, this._alert, this._autoForce.field);
@@ -358,28 +360,13 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   }
 
   _resolveName(stateObj) {
-    if (typeof this._hass?.formatEntityName === "function") {
-      try {
-        return this._hass.formatEntityName(stateObj, this._config.name);
-      } catch (_) {
-        // Older/minimal HA clients may not expose all entity registries needed
-        // by structured entity-name configs. Fall back to the friendly name.
-      }
-    }
-    if (typeof this._config.name === "string") return this._config.name;
-    const nameItems = Array.isArray(this._config.name)
-      ? this._config.name
-      : this._config.name ? [this._config.name] : [];
-    if (nameItems.length && nameItems.every(item => item?.type === "text")) {
-      return nameItems.map(item => item.text || "").join(" ");
-    }
-    return stateObj.attributes.friendly_name || this._config.entity;
+    return resolveEntityName(this._hass, stateObj, this._config.name) ?? this._config.entity;
   }
 
   getCardSize() { return 1; }
 
   static async getConfigElement() {
-    await import("./verisure-owa-alarm-badge-editor.js?v=da96cf50-5.11.0");
+    await import("./verisure-owa-alarm-badge-editor.js?v=f7226385-5.11.0");
     return document.createElement("verisure-owa-alarm-badge-editor");
   }
 

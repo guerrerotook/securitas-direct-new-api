@@ -18,15 +18,15 @@
  * Card config:
  *   type: custom:securitas-alarm-card
  *   entity: alarm_control_panel.YOUR_PANEL_ID
- *   name: My Alarm          # optional — overrides friendly_name
+ *   name: My Alarm          # optional — overrides the entity's name
  */
 
-import { escHtml } from "./verisure-owa-card-utils.js?v=a5e83573-5.11.0";
+import { createTextField, escHtml, resolveEntityName } from "./verisure-owa-card-utils.js?v=40267799-5.11.0";
 import {
   autoForceActive,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=7a72e318-5.11.0";
+} from "./verisure-owa-arm-exception.js?v=e76167ff-5.11.0";
 import {
   _t,
   STATE_CFG,
@@ -47,7 +47,7 @@ import {
   deprecationNoticeDismissed,
   dismissDeprecationNotice,
   reportDeprecatedElement,
-} from "./verisure-owa-alarm-shared.js?v=af356362-5.11.0";
+} from "./verisure-owa-alarm-shared.js?v=fc6e2696-5.11.0";
 
 // Re-export the public helper API so existing imports of these names from
 // this module keep working.
@@ -57,7 +57,7 @@ export {
   ARM_ACTIONS,
   defaultArmState,
   alarmEntitySuggestion,
-} from "./verisure-owa-alarm-shared.js?v=af356362-5.11.0";
+} from "./verisure-owa-alarm-shared.js?v=fc6e2696-5.11.0";
 
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the
@@ -216,19 +216,27 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Act on a pending auto-force intent before the render short-circuit, so a
     // freshly-appeared force-arm context is handled even on the same tick.
     this._maybeAutoForceArm(stateObj);
-    const newKey = stateObj
+    const name = stateObj ? this._resolveName(stateObj) : "";
+    const stateKey = stateObj
       ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
       : "missing";
+    const newKey = `${stateKey}|${name}`;
     if (newKey !== this._lastKey) {
+      // A rename alone must not throw away a PIN the user is typing.
+      const renamedOnly = this._lastKey?.startsWith(`${stateKey}|`);
       this._lastKey = newKey;
       // If alarm just armed/disarmed, go back to normal UI
-      if (stateObj && stateObj.state !== "disarmed" && this._uiState === "pin") {
+      if (!renamedOnly && stateObj && stateObj.state !== "disarmed" && this._uiState === "pin") {
         this._resetUI();
       }
       this._render();
     }
   }
 
+
+  _resolveName(stateObj) {
+    return resolveEntityName(this._hass, stateObj, this._config.name || undefined) || this._config.entity;
+  }
 
   // ── UI state helpers ────────────────────────────────────────────────────────
   _resetUI() {
@@ -265,7 +273,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     const attrs    = stateObj.attributes;
     const stateCfg = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
     const cfg      = { icon: stateCfg.icon, color: this._getColor(state), label: _t(lang, STATE_LABEL_KEYS[state] || state) };
-    const name     = this._config.name || attrs.friendly_name || this._config.entity;
+    const name     = this._resolveName(stateObj);
     const features = attrs.supported_features || 0;
 
     const forceArmAvailable = attrs.force_arm_available === true;
@@ -1066,15 +1074,17 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const perfFields = document.createElement("div");
     perfFields.className = "conditional-fields";
     perfFields.style.display = currentAction === "perform-action" ? "" : "none";
-    const perfInput = document.createElement("ha-textfield");
-    perfInput.label       = _t(lang, "editor_perform_action");
-    perfInput.placeholder = "domain.service";
-    perfInput.value       = current.perform_action || "";
+    const perfInput = createTextField(
+      _t(lang, "editor_perform_action"),
+      current.perform_action || "",
+      "domain.service",
+    );
     perfInput.style.width = "100%";
-    const perfDataInput = document.createElement("ha-textfield");
-    perfDataInput.label       = _t(lang, "editor_perform_data");
-    perfDataInput.placeholder = '{"entity_id": "light.living_room"}';
-    perfDataInput.value       = current.data ? JSON.stringify(current.data) : "";
+    const perfDataInput = createTextField(
+      _t(lang, "editor_perform_data"),
+      current.data ? JSON.stringify(current.data) : "",
+      '{"entity_id": "light.living_room"}',
+    );
     perfDataInput.style.width = "100%";
     perfFields.appendChild(perfInput);
     perfFields.appendChild(perfDataInput);
@@ -1175,7 +1185,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-        ha-entity-picker, ha-textfield { width: 100%; display: block; }
+        ha-entity-picker, ha-input, ha-textfield { width: 100%; display: block; }
         .section-hint {
           font-size: 0.8em;
           color: var(--secondary-text-color);
@@ -1216,7 +1226,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
         .reset-btn[hidden] { visibility: hidden; display: flex; }
         #gesture-slot { display: flex; flex-direction: column; gap: 16px; }
         .gesture-section { display: flex; flex-direction: column; }
-        .gesture-section ha-form, .gesture-section ha-textfield { display: block; width: 100%; }
+        .gesture-section ha-form, .gesture-section ha-input, .gesture-section ha-textfield { display: block; width: 100%; }
         .conditional-fields {
           display: flex;
           flex-direction: column;
@@ -1303,10 +1313,11 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     });
 
     // ── Name field (HA native) ─────────────────────────────────────────────
-    const nameTf = document.createElement("ha-textfield");
-    nameTf.label = _t(lang, "editor_name");
-    nameTf.value = this._config.name || "";
-    nameTf.placeholder = _t(lang, "editor_name_placeholder");
+    const nameTf = createTextField(
+      _t(lang, "editor_name"),
+      this._config.name || "",
+      _t(lang, "editor_name_placeholder"),
+    );
     nameTf.addEventListener("input", (e) => {
       const val = e.target.value.trim();
       if (val) {

@@ -1,7 +1,6 @@
 """Tests for the shared entity helpers in entity.py."""
 
 from homeassistant.helpers import device_registry as dr
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN
 from custom_components.securitas import entity as entity_mod
@@ -10,6 +9,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     Installation,
 )
+from tests.ha_harness import MockConfigEntry
 
 
 def _make_installation():
