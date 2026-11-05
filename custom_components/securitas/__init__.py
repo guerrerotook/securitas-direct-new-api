@@ -1448,6 +1448,7 @@ def _register_verisure_owa_entity_service(
     schema: dict | None = None,
     voluptuous_schema: vol.Schema | None = None,
     supports_response: SupportsResponse = SupportsResponse.NONE,
+    once_per: str | None = None,
 ) -> None:
     """Register an entity service directly under ``verisure_owa.<service_name>``.
 
@@ -1460,6 +1461,10 @@ def _register_verisure_owa_entity_service(
 
     ``component_domain`` is the entity-platform domain ("alarm_control_panel",
     "camera", "sensor") whose EntityComponent owns the target entities.
+
+    ``once_per`` names an entity property: of the targeted entities sharing a
+    value of it, only one runs the method. Set it when several entities front
+    the same physical thing and the method acts on that thing.
     """
     if hass.services.has_service(ALIAS_DOMAIN, service_name):
         return
@@ -1474,13 +1479,19 @@ def _register_verisure_owa_entity_service(
         entity_ids = await _async_extract_service_entity_ids(call)
         method_kwargs = remove_entity_service_fields(call)
         responses: dict[str, Any] = {}
-        for eid in entity_ids:
+        done: set[Any] = set()
+        for eid in sorted(entity_ids):
             entity = component.get_entity(eid)
             if entity is None:
                 continue
             method = getattr(entity, method_name, None)
             if method is None:
                 continue
+            if once_per is not None:
+                key = getattr(entity, once_per)
+                if key in done:
+                    continue
+                done.add(key)
             entity.async_set_context(call.context)
             result = await method(**method_kwargs)
             if supports_response == SupportsResponse.ONLY:
@@ -1533,6 +1544,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
         "service_name": "capture_image",
         "component_domain": "camera",
         "method_name": "async_manual_capture",
+        "once_per": "physical_camera",
         "schema": {
             "name": "Capture image",
             "description": (

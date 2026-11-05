@@ -107,6 +107,11 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
             ),
         )
 
+    @property
+    def physical_camera(self) -> tuple[str, str]:
+        """Identify the camera; the thumbnail and full image entities share it."""
+        return (self._installation.number, self._zone_id)
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
