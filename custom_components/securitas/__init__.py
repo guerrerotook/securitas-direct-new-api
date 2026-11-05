@@ -1488,6 +1488,14 @@ def _register_verisure_owa_entity_service(
             key = eid if once_per is None else getattr(entity, once_per)
             groups.setdefault(key, []).append((eid, entity))
         for group in groups.values():
+            # A reload during an earlier group may have removed or replaced these.
+            group = [
+                (eid, live)
+                for eid, _ in group
+                if (live := component.get_entity(eid)) is not None
+            ]
+            if not group:
+                continue
             # Set per group, just before it runs: Home Assistant drops a context
             # older than 5 seconds, and an earlier group may run for longer.
             for _, entity in group:

@@ -4177,6 +4177,82 @@ class TestCaptureImageOncePerCamera:
             "QR10",
             "QR11",
         ]
+
+    async def test_camera_removed_during_an_earlier_capture_is_skipped(
+        self, hass, hub, entry
+    ):
+        """A config-entry reload can remove entities while a capture is running."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second[0])
+
+        async def remove_second_camera(_installation, camera_device):
+            if camera_device.zone_id == "QR10":
+                for entity in second:
+                    await entity.async_remove()
+            return None, None
+
+        hub.capture_image.side_effect = remove_second_camera
+
+        await self._capture(hass, {"area_id": area_id})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    async def test_camera_replaced_during_an_earlier_capture_is_captured(
+        self, hass, hub, entry
+    ):
+        """A reload can finish during a capture: same ids, new entity objects."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second[0])
+        old_ids = [entity.entity_id for entity in second]
+        replaced = []
+
+        async def replace_second_camera(_installation, camera_device):
+            if camera_device.zone_id == "QR10":
+                for entity in second:
+                    await entity.async_remove()
+                replaced.extend(
+                    await self._add_camera(hass, hub, entry, zone_id="QR11")
+                )
+            return None, None
+
+        hub.capture_image.side_effect = replace_second_camera
+
+        context = Context()
+        await self._capture(hass, {"area_id": area_id}, context)
+
+        assert [entity.entity_id for entity in replaced] == old_ids
+        assert hass.data["camera"].get_entity(old_ids[0]) is replaced[0]
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+        assert replaced[0]._context == context
+
+    async def test_only_the_removed_entity_of_a_camera_is_dropped(
+        self, hass, hub, entry
+    ):
+        """Removing a camera's first entity leaves its sibling to run the capture."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second[0])
+        removed, sibling = sorted(second, key=lambda entity: entity.entity_id)
+
+        async def remove_first_entity(_installation, camera_device):
+            if camera_device.zone_id == "QR10":
+                await removed.async_remove()
+            return None, None
+
+        hub.capture_image.side_effect = remove_first_entity
+
+        context = Context()
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new_callable=AsyncMock,
+        ) as inject_event:
+            await self._capture(hass, {"area_id": area_id}, context)
+
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+        assert removed._context is None
+        assert sibling._context == context
         assert inject_event.await_args_list[1].kwargs["context"] == context
 
     async def test_camera_from_another_integration_is_skipped(self, hass, hub, entry):
