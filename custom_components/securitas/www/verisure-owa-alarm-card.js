@@ -21,12 +21,12 @@
  *   name: My Alarm          # optional — overrides the entity's name
  */
 
-import { createTextField, escHtml, resolveEntityName } from "./verisure-owa-card-utils.js?v=40267799-5.11.0";
+import { createTextField, escHtml, resolveEntityName } from "./verisure-owa-card-utils.js?v=40267799-5.12.0";
 import {
   autoForceActive,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=e76167ff-5.11.0";
+} from "./verisure-owa-arm-exception.js?v=e76167ff-5.12.0";
 import {
   _t,
   STATE_CFG,
@@ -47,7 +47,7 @@ import {
   deprecationNoticeDismissed,
   dismissDeprecationNotice,
   reportDeprecatedElement,
-} from "./verisure-owa-alarm-shared.js?v=fc6e2696-5.11.0";
+} from "./verisure-owa-alarm-shared.js?v=583a53e9-5.12.0";
 
 // Re-export the public helper API so existing imports of these names from
 // this module keep working.
@@ -57,7 +57,7 @@ export {
   ARM_ACTIONS,
   defaultArmState,
   alarmEntitySuggestion,
-} from "./verisure-owa-alarm-shared.js?v=fc6e2696-5.11.0";
+} from "./verisure-owa-alarm-shared.js?v=583a53e9-5.12.0";
 
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the

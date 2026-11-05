@@ -8,4 +8,4 @@
 // resolves there rather than under /verisure-owa-panel/: a user with both
 // resources registered loads the canonical module twice (harmless, as the
 // registrations are guarded).
-import "./verisure-owa-camera-card.js?v=4f4a29ac-5.11.0";
+import "./verisure-owa-camera-card.js?v=7f1b7217-5.12.0";
