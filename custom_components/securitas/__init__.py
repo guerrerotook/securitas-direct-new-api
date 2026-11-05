@@ -1463,8 +1463,9 @@ def _register_verisure_owa_entity_service(
     "camera", "sensor") whose EntityComponent owns the target entities.
 
     ``once_per`` names an entity property: of the targeted entities sharing a
-    value of it, only one runs the method. Set it when several entities front
-    the same physical thing and the method acts on that thing.
+    value of it, the first in sorted order runs the method and all of them get
+    the call's context. Set it when several entities front the same physical
+    thing and the method acts on that thing.
     """
     if hass.services.has_service(ALIAS_DOMAIN, service_name):
         return

@@ -3904,7 +3904,9 @@ class TestCaptureImageOncePerCamera:
     """capture_image makes one capture per camera, however many entities it reaches.
 
     Either entity of a camera gives the same capture, and which one runs depends
-    on the entity ids, so these tests count captures and never name the entity.
+    on the entity ids, so the capture tests count captures and never name the
+    entity. The context tests read the thumbnail, the entity that shows a capture,
+    whichever one ran.
     """
 
     @pytest.fixture
