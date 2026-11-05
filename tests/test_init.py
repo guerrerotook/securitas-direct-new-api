@@ -103,7 +103,6 @@ from custom_components.securitas.hub import (
 )
 from custom_components.securitas.log_filter import SensitiveDataFilter
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
-from custom_components.securitas.verisure_owa_api import Installation
 from custom_components.securitas.verisure_owa_api.client import _base as client_base
 from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
@@ -3943,7 +3942,7 @@ class TestCaptureImageOncePerCamera:
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, f"v4_securitas_direct.{number}")},
         )
-        installation = Installation(number=number, panel="SDVECU", alias="Home")
+        installation = make_installation(number=number)
         camera_device = CameraDevice(
             id="1",
             code=10,

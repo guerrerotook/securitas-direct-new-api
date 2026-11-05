@@ -1165,7 +1165,7 @@ tests/
 ├── test_http_transport.py          HttpTransport: POST, retries, WAF detection, JSON parsing
 ├── test_hub.py                     VerisureHub: login and token saving, lock and camera operations, service cache
 ├── test_humanize_panel_error.py    Turning the panel's raw error codes into readable notification text
-├── test_init.py                    Integration setup, session sharing, background discovery, entry migrations, Repairs issues
+├── test_init.py                    Integration setup, session sharing, background discovery, entry migrations, Repairs issues, targeting of the verisure_owa.* services
 ├── test_integration.py             Integration tests using MockGraphQLServer (see below)
 ├── test_ipv4_first.py              Connecting over IPv4 first, with a fallback (#606)
 ├── test_log_filter.py              SensitiveDataFilter: secret redaction, installation masking
@@ -1229,7 +1229,7 @@ result = await hass.config_entries.flow.async_configure(result["flow_id"], user_
 assert result["type"] == FlowResultType.FORM
 ```
 
-**Integration setup tests** (test_init): Patch `VerisureHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms.
+**Integration setup tests** (test_init): Patch `VerisureHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms. The service-target tests are the exception: they add entities to a real `EntityPlatform` and call the actions through `hass.services`.
 
 **Coordinator tests** (test_coordinators): Test all five coordinators with mocked `VerisureOwaClient` and `ApiQueue`. Verify data fetching, error handling (SessionExpiredError recovery, auth failures that ask for reauth, WAFBlockedError, general errors), and data preservation across refreshes.
 
