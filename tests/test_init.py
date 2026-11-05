@@ -3,14 +3,18 @@
 import asyncio
 import contextlib
 import hashlib
+import importlib
 import logging
 import os
 import time
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
+from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.const import (
     CONF_DEVICE_ID,
@@ -19,8 +23,17 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
+from homeassistant.core import Context
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import EntityPlatform
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
 
@@ -71,8 +84,16 @@ from custom_components.securitas import (
     async_setup_entry,
     async_unload_entry,
     async_update_options,
+    register_service_aliases,
+    register_v5_entity_services,
 )
-from custom_components.securitas.const import API_CACHE_TTL, CONF_KEEP_PASSWORD
+from custom_components.securitas.camera import VerisureCamera, VerisureCameraFull
+from custom_components.securitas.const import (
+    API_CACHE_TTL,
+    CONF_KEEP_PASSWORD,
+    SIGNAL_CAMERA_STATE,
+)
+from custom_components.securitas.coordinators import CameraCoordinator, CameraData
 from custom_components.securitas.hub import (
     _async_notify,
     _hashed_issue_id,
@@ -94,6 +115,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     TwoFactorRequiredError,
     VerisureOwaError,
 )
+from custom_components.securitas.verisure_owa_api.models import CameraDevice
 from tests.conftest import (
     LOGIN_SERVER_FAULTS,
     LOGIN_WRONG_PASSWORD,
@@ -3665,6 +3687,584 @@ class TestServiceTargetCompatibility:
 
         assert result == {"alarm_control_panel.home"}
         extract.assert_awaited_once_with(call)
+
+
+# ===========================================================================
+# Targeting of the verisure_owa.* entity services
+# ===========================================================================
+
+
+def _ha_has_target_exclude() -> bool:
+    try:
+        target = importlib.import_module("homeassistant.helpers.target")
+    except ImportError:
+        return False
+    return hasattr(target, "async_extract_excluded_entity_ids")
+
+
+_HAS_TARGET_EXCLUDE = _ha_has_target_exclude()
+
+
+class _FakeEntity:
+    """Has the signatures of the real entity methods, so stray keywords raise."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def async_set_context(self, context) -> None:
+        pass
+
+    async def async_manual_refresh(self) -> None:
+        self.calls.append({})
+
+    async def async_fetch_image(self, id_signal: str, signal_type: str) -> dict:
+        self.calls.append({"id_signal": id_signal, "signal_type": signal_type})
+        return {"image_b64": "encoded", "mime_type": "image/jpeg"}
+
+
+class _FakeComponent:
+    def __init__(self, entities: dict[str, _FakeEntity]) -> None:
+        self._entities = entities
+
+    def get_entity(self, entity_id: str) -> _FakeEntity | None:
+        return self._entities.get(entity_id)
+
+
+def _setup_two_entities_in_an_area(
+    hass, domain: str
+) -> tuple[str, list[str], dict[str, _FakeEntity]]:
+    """Return the area id, the two entity ids and their fake entities."""
+    registry = er.async_get(hass)
+    area_id = ar.async_get(hass).async_create("Hall").id
+    entities: dict[str, _FakeEntity] = {}
+    for unique_id in ("one", "two"):
+        entry = registry.async_get_or_create(domain, "securitas", unique_id)
+        registry.async_update_entity(entry.entity_id, area_id=area_id)
+        entities[entry.entity_id] = _FakeEntity()
+        hass.states.async_set(entry.entity_id, "disarmed")
+    hass.data[domain] = _FakeComponent(entities)
+    register_v5_entity_services(hass)
+    return area_id, list(entities), entities
+
+
+class TestRefreshAlarmTargets:
+    """A service with no fields of its own reaches only the targeted entities."""
+
+    async def _call(self, hass, target: dict) -> None:
+        await hass.services.async_call(
+            "verisure_owa", "refresh_alarm", {}, target=target, blocking=True
+        )
+
+    async def test_entity_target_reaches_only_that_entity(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "alarm_control_panel")
+
+        await self._call(hass, {"entity_id": ids[0]})
+
+        assert entities[ids[0]].calls == [{}]
+        assert entities[ids[1]].calls == []
+
+    async def test_area_target_reaches_every_entity_in_the_area(self, hass):
+        area_id, ids, entities = _setup_two_entities_in_an_area(
+            hass, "alarm_control_panel"
+        )
+
+        await self._call(hass, {"area_id": area_id})
+
+        assert entities[ids[0]].calls == [{}]
+        assert entities[ids[1]].calls == [{}]
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_excluded_entity_is_left_out(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "alarm_control_panel")
+
+        await self._call(hass, {"entity_id": ids, "exclude": {"entity_id": [ids[1]]}})
+
+        assert entities[ids[0]].calls == [{}]
+        assert entities[ids[1]].calls == []
+
+
+class TestFetchActivityImageTargets:
+    """A service with real fields keeps them, whatever the target."""
+
+    FIELDS = {"id_signal": "42", "signal_type": "16"}
+
+    async def _call(self, hass, target: dict) -> dict:
+        return await hass.services.async_call(
+            "verisure_owa",
+            "fetch_activity_image",
+            dict(self.FIELDS),
+            target=target,
+            blocking=True,
+            return_response=True,
+        )
+
+    async def test_entity_target_passes_the_real_fields(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "sensor")
+
+        response = await self._call(hass, {"entity_id": ids[0]})
+
+        assert entities[ids[0]].calls == [self.FIELDS]
+        assert entities[ids[1]].calls == []
+        assert set(response) == {ids[0]}
+
+    async def test_area_target_passes_the_real_fields(self, hass):
+        area_id, ids, entities = _setup_two_entities_in_an_area(hass, "sensor")
+
+        response = await self._call(hass, {"area_id": area_id})
+
+        assert entities[ids[0]].calls == [self.FIELDS]
+        assert entities[ids[1]].calls == [self.FIELDS]
+        assert set(response) == set(ids)
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_excluded_entity_is_left_out_and_real_fields_arrive(self, hass):
+        _, ids, entities = _setup_two_entities_in_an_area(hass, "sensor")
+
+        response = await self._call(
+            hass, {"entity_id": ids, "exclude": {"entity_id": [ids[1]]}}
+        )
+
+        assert entities[ids[0]].calls == [self.FIELDS]
+        assert entities[ids[1]].calls == []
+        assert set(response) == {ids[0]}
+
+
+class _ForceArmPanel(Entity):
+    _attr_should_poll = False
+
+    def __init__(self, name: str) -> None:
+        self._attr_unique_id = name
+        self._attr_name = name
+        self.codes: list[str | None] = []
+
+    async def async_force_arm(self, code: str | None = None) -> None:
+        self.codes.append(code)
+
+
+class TestAliasedServiceTargets:
+    """Exclusion through the verisure_owa.* alias of a securitas.* service."""
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_aliased_service_honours_exclude(self, hass):
+        """The verisure_owa.* alias forwards ``exclude`` to the securitas.* service."""
+        platform = EntityPlatform(
+            hass=hass,
+            logger=logging.getLogger(__name__),
+            domain="alarm_control_panel",
+            platform_name="securitas",
+            platform=None,
+            scan_interval=timedelta(seconds=30),
+            entity_namespace=None,
+        )
+        kept, excluded = _ForceArmPanel("kept"), _ForceArmPanel("excluded")
+        await platform.async_add_entities([kept, excluded])
+        platform.async_register_entity_service(
+            "force_arm", {vol.Optional("code"): cv.string}, "async_force_arm"
+        )
+        register_service_aliases(hass)
+
+        await hass.services.async_call(
+            "verisure_owa",
+            "force_arm",
+            {"code": "1234"},
+            target={
+                "entity_id": [kept.entity_id, excluded.entity_id],
+                "exclude": {"entity_id": [excluded.entity_id]},
+            },
+            blocking=True,
+        )
+
+        assert kept.codes == ["1234"]
+        assert excluded.codes == []
+
+
+class _ForeignCamera(Camera):
+    """A camera from another integration, so without async_manual_capture."""
+
+    _attr_should_poll = False
+    _attr_unique_id = "foreign"
+    _attr_name = "Foreign"
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        return None
+
+
+class TestCaptureImageOncePerCamera:
+    """capture_image makes one capture per camera, however many entities it reaches.
+
+    Either entity of a camera gives the same capture, and which one runs depends
+    on the entity ids, so the capture tests count captures and never name the
+    entity. The context tests read the thumbnail, the entity that shows a capture,
+    whichever one ran.
+    """
+
+    @pytest.fixture
+    async def hub(self, hass) -> MagicMock:
+        assert await async_setup_component(hass, "camera", {})
+        hub = MagicMock()
+        hub.hass = hass
+        hub.is_capturing = MagicMock(return_value=False)
+        hub.capture_image = AsyncMock(return_value=(None, None))
+        register_v5_entity_services(hass)
+        return hub
+
+    @pytest.fixture
+    def entry(self, hass) -> MockConfigEntry:
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        return entry
+
+    def _platform(self, hass, name: str) -> EntityPlatform:
+        return EntityPlatform(
+            hass=hass,
+            logger=logging.getLogger(__name__),
+            domain="camera",
+            platform_name=name,
+            platform=None,
+            scan_interval=timedelta(seconds=30),
+            entity_namespace=None,
+        )
+
+    async def _add_camera(
+        self, hass, hub, entry, number: str = "1", zone_id: str = "QR10"
+    ) -> tuple[VerisureCamera, VerisureCameraFull]:
+        """Add a real camera's two entities, as one device under its installation."""
+        dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"v4_securitas_direct.{number}")},
+        )
+        installation = make_installation(number=number)
+        camera_device = CameraDevice(
+            id="1",
+            code=10,
+            zone_id=zone_id,
+            name=f"Camera {number} {zone_id}",
+            device_type="QR",
+        )
+        coordinator = MagicMock(spec=CameraCoordinator)
+        coordinator.data = CameraData(thumbnails={}, full_images={})
+        coordinator.config_entry = entry
+        coordinator.last_update_success = True
+        coordinator.async_add_listener = MagicMock(return_value=MagicMock())
+        thumbnail = VerisureCamera(coordinator, hub, installation, camera_device)
+        full_image = VerisureCameraFull(coordinator, hub, installation, camera_device)
+        platform = self._platform(hass, DOMAIN)
+        platform.config_entry = entry
+        await platform.async_add_entities([thumbnail, full_image])
+        return thumbnail, full_image
+
+    def _device_id(self, hass, entity) -> str:
+        return er.async_get(hass).async_get(entity.entity_id).device_id
+
+    def _put_in_area(self, hass, *entities) -> str:
+        """Set the area on the device: the thumbnail has no name of its own."""
+        area_id = ar.async_get(hass).async_create("Hall").id
+        for entity in entities:
+            dr.async_get(hass).async_update_device(
+                self._device_id(hass, entity), area_id=area_id
+            )
+        return area_id
+
+    async def _capture(
+        self, hass, target: dict, context: Context | None = None
+    ) -> None:
+        await hass.services.async_call(
+            "verisure_owa",
+            "capture_image",
+            {},
+            target=target,
+            blocking=True,
+            context=context,
+        )
+
+    def _signal_capturing(
+        self, hass, hub, while_capturing: Callable[[], object]
+    ) -> None:
+        """Have the fake hub flag and signal a capture starting, as the real one does."""
+        capturing: set[str] = set()
+        hub.is_capturing.side_effect = lambda _number, zone_id: zone_id in capturing
+
+        async def capture(installation, camera_device):
+            capturing.add(camera_device.zone_id)
+            async_dispatcher_send(
+                hass,
+                SIGNAL_CAMERA_STATE,
+                installation.number,
+                camera_device.zone_id,
+            )
+            while_capturing()
+            capturing.discard(camera_device.zone_id)
+            return None, None
+
+        hub.capture_image.side_effect = capture
+
+    def _captures(self, hub) -> list[tuple[str, str]]:
+        return sorted(
+            (call.args[0].number, call.args[1].zone_id)
+            for call in hub.capture_image.await_args_list
+        )
+
+    async def test_thumbnail_entity_alone_captures_once(self, hass, hub, entry):
+        thumbnail, _ = await self._add_camera(hass, hub, entry)
+
+        await self._capture(hass, {"entity_id": thumbnail.entity_id})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    async def test_full_image_entity_alone_captures_once(self, hass, hub, entry):
+        _, full_image = await self._add_camera(hass, hub, entry)
+
+        await self._capture(hass, {"entity_id": full_image.entity_id})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    async def test_both_entities_named_capture_once(self, hass, hub, entry):
+        entities = await self._add_camera(hass, hub, entry)
+
+        await self._capture(hass, {"entity_id": [e.entity_id for e in entities]})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    async def test_area_target_captures_once(self, hass, hub, entry):
+        thumbnail, _ = await self._add_camera(hass, hub, entry)
+        area_id = self._put_in_area(hass, thumbnail)
+
+        await self._capture(hass, {"area_id": area_id})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    async def test_device_target_captures_once(self, hass, hub, entry):
+        thumbnail, _ = await self._add_camera(hass, hub, entry)
+
+        await self._capture(hass, {"device_id": self._device_id(hass, thumbnail)})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_area_with_full_image_excluded_captures_once(self, hass, hub, entry):
+        thumbnail, full_image = await self._add_camera(hass, hub, entry)
+        area_id = self._put_in_area(hass, thumbnail)
+
+        await self._capture(
+            hass,
+            {"area_id": area_id, "exclude": {"entity_id": [full_image.entity_id]}},
+        )
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_area_with_thumbnail_excluded_captures_once(self, hass, hub, entry):
+        thumbnail, _ = await self._add_camera(hass, hub, entry)
+        area_id = self._put_in_area(hass, thumbnail)
+
+        await self._capture(
+            hass,
+            {"area_id": area_id, "exclude": {"entity_id": [thumbnail.entity_id]}},
+        )
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    @pytest.mark.skipif(
+        not _HAS_TARGET_EXCLUDE,
+        reason="the exclude block was added after our minimum-supported HA (2025.2)",
+    )
+    async def test_area_with_both_entities_excluded_captures_nothing(
+        self, hass, hub, entry
+    ):
+        entities = await self._add_camera(hass, hub, entry)
+        area_id = self._put_in_area(hass, entities[0])
+
+        await self._capture(
+            hass,
+            {
+                "area_id": area_id,
+                "exclude": {"entity_id": [e.entity_id for e in entities]},
+            },
+        )
+
+        assert self._captures(hub) == []
+
+    async def test_two_cameras_capture_once_each(self, hass, hub, entry):
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second, _ = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second)
+
+        await self._capture(hass, {"area_id": area_id})
+
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+
+    async def test_same_zone_id_at_two_installations_counts_as_two_cameras(
+        self, hass, hub, entry
+    ):
+        first, _ = await self._add_camera(hass, hub, entry, number="1")
+        second, _ = await self._add_camera(hass, hub, entry, number="2")
+        area_id = self._put_in_area(hass, first, second)
+
+        await self._capture(hass, {"area_id": area_id})
+
+        assert self._captures(hub) == [("1", "QR10"), ("2", "QR10")]
+
+    async def test_skipped_thumbnail_writes_capturing_under_the_call_context(
+        self, hass, hub, entry
+    ):
+        """The thumbnail is the entity that shows the capture, even when skipped."""
+        thumbnail, full_image = await self._add_camera(hass, hub, entry)
+        er.async_get(hass).async_update_entity(
+            full_image.entity_id, new_entity_id="camera.a_full_image"
+        )
+        await hass.async_block_till_done()
+        assert full_image.entity_id == "camera.a_full_image"
+        assert full_image.entity_id < thumbnail.entity_id
+        context = Context()
+        states = []
+        self._signal_capturing(
+            hass, hub, lambda: states.append(hass.states.get(thumbnail.entity_id))
+        )
+
+        await self._capture(
+            hass,
+            {"entity_id": [thumbnail.entity_id, full_image.entity_id]},
+            context,
+        )
+
+        assert self._captures(hub) == [("1", "QR10")]
+        assert states[0].attributes["capturing"] is True
+        assert states[0].context == context
+
+    async def test_second_camera_gets_the_context_after_a_slow_first_capture(
+        self, hass, hub, entry, freezer
+    ):
+        """Home Assistant drops a context older than 5 seconds at the next state write."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second, _ = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second)
+        context = Context()
+        states = []
+
+        def slow_capture() -> None:
+            states.append(hass.states.get(second.entity_id))
+            freezer.tick(timedelta(seconds=30))
+
+        self._signal_capturing(hass, hub, slow_capture)
+
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new_callable=AsyncMock,
+        ) as inject_event:
+            await self._capture(hass, {"area_id": area_id}, context)
+
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+        assert states[1].attributes["capturing"] is True
+        assert states[1].context == context
+        assert [call.kwargs["device"] for call in inject_event.await_args_list] == [
+            "QR10",
+            "QR11",
+        ]
+
+    async def test_camera_removed_during_an_earlier_capture_is_skipped(
+        self, hass, hub, entry
+    ):
+        """A config-entry reload can remove entities while a capture is running."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second[0])
+
+        async def remove_second_camera(_installation, camera_device):
+            if camera_device.zone_id == "QR10":
+                for entity in second:
+                    await entity.async_remove()
+            return None, None
+
+        hub.capture_image.side_effect = remove_second_camera
+
+        await self._capture(hass, {"area_id": area_id})
+
+        assert self._captures(hub) == [("1", "QR10")]
+
+    async def test_camera_replaced_during_an_earlier_capture_is_captured(
+        self, hass, hub, entry
+    ):
+        """A reload can finish during a capture: same ids, new entity objects."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second[0])
+        old_ids = [entity.entity_id for entity in second]
+        replaced = []
+
+        async def replace_second_camera(_installation, camera_device):
+            if camera_device.zone_id == "QR10":
+                for entity in second:
+                    await entity.async_remove()
+                replaced.extend(
+                    await self._add_camera(hass, hub, entry, zone_id="QR11")
+                )
+            return None, None
+
+        hub.capture_image.side_effect = replace_second_camera
+
+        context = Context()
+        await self._capture(hass, {"area_id": area_id}, context)
+
+        assert [entity.entity_id for entity in replaced] == old_ids
+        assert hass.data["camera"].get_entity(old_ids[0]) is replaced[0]
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+        assert replaced[0]._context == context
+
+    async def test_only_the_removed_entity_of_a_camera_is_dropped(
+        self, hass, hub, entry
+    ):
+        """Removing a camera's first entity leaves its sibling to run the capture."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second[0])
+        removed, sibling = sorted(second, key=lambda entity: entity.entity_id)
+
+        async def remove_first_entity(_installation, camera_device):
+            if camera_device.zone_id == "QR10":
+                await removed.async_remove()
+            return None, None
+
+        hub.capture_image.side_effect = remove_first_entity
+
+        context = Context()
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new_callable=AsyncMock,
+        ) as inject_event:
+            await self._capture(hass, {"area_id": area_id}, context)
+
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+        assert removed._context is None
+        assert sibling._context == context
+        assert inject_event.await_args_list[1].kwargs["context"] == context
+
+    async def test_camera_from_another_integration_is_skipped(self, hass, hub, entry):
+        thumbnail, _ = await self._add_camera(hass, hub, entry)
+        foreign = _ForeignCamera()
+        await self._platform(hass, "other").async_add_entities([foreign])
+        area_id = self._put_in_area(hass, thumbnail)
+        er.async_get(hass).async_update_entity(foreign.entity_id, area_id=area_id)
+
+        await self._capture(hass, {"area_id": area_id})
+
+        assert self._captures(hub) == [("1", "QR10")]
 
 
 # ===========================================================================

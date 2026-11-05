@@ -518,7 +518,7 @@ When something goes wrong, you get a persistent notification:
 
 ## Cameras
 
-Each Verisure camera produces two entities — `camera.<name>` for the thumbnail and `camera.<name>_full_image` for the full-resolution image. To request a fresh image, call the **`verisure_owa.capture_image`** service on the thumbnail entity from an automation, the Developer Tools, or the bundled camera card's refresh button. The thumbnail entity exposes a `capturing` attribute (true while a request is in flight) so dashboards and automations can react to it.
+Each Verisure camera produces two entities — `camera.<name>` for the thumbnail and `camera.<name>_full_image` for the full-resolution image. To request a fresh image, call the **`verisure_owa.capture_image`** service on a camera entity from an automation, the Developer Tools, or the bundled camera card's refresh button. You can also target an area, device, floor or label: each camera takes one picture, even though the target reaches both of its entities. To leave a camera out, exclude both of its entities. The thumbnail entity exposes a `capturing` attribute (true while a request is in flight) so dashboards and automations can react to it.
 
 Captures can take up to 30 seconds to appear, depending on how busy the API is — the integration waits for a frame strictly newer than the one being displayed before completing.
 
@@ -649,7 +649,7 @@ data:
 | Service | Target | Description |
 |---|---|---|
 | `verisure_owa.refresh_alarm` | `alarm_control_panel.*` | Authoritative status round-trip with the panel (not a lightweight read). Same as the alarm card's refresh button. |
-| `verisure_owa.capture_image` | `camera.*` (thumbnail) | Request a fresh image capture. Waits up to 30 s for a strictly newer frame before completing. Injects an `image_request` activity event. |
+| `verisure_owa.capture_image` | `camera.*` | Request a fresh image capture. Takes one picture per camera, even when the target reaches both its thumbnail and full image entities. To leave a camera out, exclude both of its entities. Waits up to 30 s for a strictly newer frame before completing. Injects an `image_request` activity event. |
 | `verisure_owa.refresh_activity_log` | `sensor.*_activity_log` | Foreground-refresh the activity timeline on demand. Same as the activity log card's refresh button. (Background polling is off by default — see [Activity Log → How often it refreshes](#how-often-it-refreshes).) |
 | `verisure_owa.fetch_activity_image` | `sensor.*_activity_log` | On-demand historical image fetch for an activity event. Returns base64-encoded bytes + `mime_type` (response service). Takes required `id_signal` + `signal_type` fields. |
 | `verisure_owa.force_arm` | `alarm_control_panel.*` | Force-arm overriding non-blocking exceptions from a previous failed arm. See [Force Arming](#force-arming-advanced). |
