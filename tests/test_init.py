@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,12 +23,14 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
+from homeassistant.core import Context
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.setup import async_setup_component
@@ -85,7 +88,11 @@ from custom_components.securitas import (
     register_v5_entity_services,
 )
 from custom_components.securitas.camera import VerisureCamera, VerisureCameraFull
-from custom_components.securitas.const import API_CACHE_TTL, CONF_KEEP_PASSWORD
+from custom_components.securitas.const import (
+    API_CACHE_TTL,
+    CONF_KEEP_PASSWORD,
+    SIGNAL_CAMERA_STATE,
+)
 from custom_components.securitas.coordinators import CameraCoordinator, CameraData
 from custom_components.securitas.hub import (
     _async_notify,
@@ -3968,10 +3975,38 @@ class TestCaptureImageOncePerCamera:
             )
         return area_id
 
-    async def _capture(self, hass, target: dict) -> None:
+    async def _capture(
+        self, hass, target: dict, context: Context | None = None
+    ) -> None:
         await hass.services.async_call(
-            "verisure_owa", "capture_image", {}, target=target, blocking=True
+            "verisure_owa",
+            "capture_image",
+            {},
+            target=target,
+            blocking=True,
+            context=context,
         )
+
+    def _signal_capturing(
+        self, hass, hub, while_capturing: Callable[[], object]
+    ) -> None:
+        """Have the fake hub flag and signal a capture starting, as the real one does."""
+        capturing: set[str] = set()
+        hub.is_capturing.side_effect = lambda _number, zone_id: zone_id in capturing
+
+        async def capture(installation, camera_device):
+            capturing.add(camera_device.zone_id)
+            async_dispatcher_send(
+                hass,
+                SIGNAL_CAMERA_STATE,
+                installation.number,
+                camera_device.zone_id,
+            )
+            while_capturing()
+            capturing.discard(camera_device.zone_id)
+            return None, None
+
+        hub.capture_image.side_effect = capture
 
     def _captures(self, hub) -> list[tuple[str, str]]:
         return sorted(
@@ -4084,6 +4119,64 @@ class TestCaptureImageOncePerCamera:
         await self._capture(hass, {"area_id": area_id})
 
         assert self._captures(hub) == [("1", "QR10"), ("2", "QR10")]
+
+    async def test_skipped_thumbnail_writes_capturing_under_the_call_context(
+        self, hass, hub, entry
+    ):
+        """The thumbnail is the entity that shows the capture, even when skipped."""
+        thumbnail, full_image = await self._add_camera(hass, hub, entry)
+        er.async_get(hass).async_update_entity(
+            full_image.entity_id, new_entity_id="camera.a_full_image"
+        )
+        await hass.async_block_till_done()
+        assert full_image.entity_id == "camera.a_full_image"
+        assert full_image.entity_id < thumbnail.entity_id
+        context = Context()
+        states = []
+        self._signal_capturing(
+            hass, hub, lambda: states.append(hass.states.get(thumbnail.entity_id))
+        )
+
+        await self._capture(
+            hass,
+            {"entity_id": [thumbnail.entity_id, full_image.entity_id]},
+            context,
+        )
+
+        assert self._captures(hub) == [("1", "QR10")]
+        assert states[0].attributes["capturing"] is True
+        assert states[0].context == context
+
+    async def test_second_camera_gets_the_context_after_a_slow_first_capture(
+        self, hass, hub, entry, freezer
+    ):
+        """Home Assistant drops a context older than 5 seconds at the next state write."""
+        first, _ = await self._add_camera(hass, hub, entry, zone_id="QR10")
+        second, _ = await self._add_camera(hass, hub, entry, zone_id="QR11")
+        area_id = self._put_in_area(hass, first, second)
+        context = Context()
+        states = []
+
+        def slow_capture() -> None:
+            states.append(hass.states.get(second.entity_id))
+            freezer.tick(timedelta(seconds=30))
+
+        self._signal_capturing(hass, hub, slow_capture)
+
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new_callable=AsyncMock,
+        ) as inject_event:
+            await self._capture(hass, {"area_id": area_id}, context)
+
+        assert self._captures(hub) == [("1", "QR10"), ("1", "QR11")]
+        assert states[1].attributes["capturing"] is True
+        assert states[1].context == context
+        assert [call.kwargs["device"] for call in inject_event.await_args_list] == [
+            "QR10",
+            "QR11",
+        ]
+        assert inject_event.await_args_list[1].kwargs["context"] == context
 
     async def test_camera_from_another_integration_is_skipped(self, hass, hub, entry):
         thumbnail, _ = await self._add_camera(hass, hub, entry)

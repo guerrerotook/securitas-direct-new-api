@@ -1479,21 +1479,20 @@ def _register_verisure_owa_entity_service(
         entity_ids = await _async_extract_service_entity_ids(call)
         method_kwargs = remove_entity_service_fields(call)
         responses: dict[str, Any] = {}
-        done: set[Any] = set()
+        groups: dict[Any, list[tuple[str, Any]]] = {}
         for eid in sorted(entity_ids):
             entity = component.get_entity(eid)
-            if entity is None:
+            if entity is None or getattr(entity, method_name, None) is None:
                 continue
-            method = getattr(entity, method_name, None)
-            if method is None:
-                continue
-            if once_per is not None:
-                key = getattr(entity, once_per)
-                if key in done:
-                    continue
-                done.add(key)
-            entity.async_set_context(call.context)
-            result = await method(**method_kwargs)
+            key = eid if once_per is None else getattr(entity, once_per)
+            groups.setdefault(key, []).append((eid, entity))
+        for group in groups.values():
+            # Set per group, just before it runs: Home Assistant drops a context
+            # older than 5 seconds, and an earlier group may run for longer.
+            for _, entity in group:
+                entity.async_set_context(call.context)
+            eid, entity = group[0]
+            result = await getattr(entity, method_name)(**method_kwargs)
             if supports_response == SupportsResponse.ONLY:
                 responses[eid] = result
         return responses if supports_response == SupportsResponse.ONLY else None
