@@ -6,7 +6,7 @@
 // auto-force-arm tick box, shared with the Tile feature, that force-arms past
 // open sensors for arms started from this dialog's own mode buttons.
 
-import { AutoForceTickBox } from "./verisure-owa-arm-exception.js?v=e76167ff-5.11.0";
+import { AutoForceTickBox } from "./verisure-owa-arm-exception.js?v=e76167ff-5.12.0";
 
 class VerisureOwaMoreInfo extends HTMLElement {
   constructor() {
