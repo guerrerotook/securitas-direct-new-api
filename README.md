@@ -518,7 +518,7 @@ When something goes wrong, you get a persistent notification:
 
 ## Cameras
 
-Each Verisure camera produces two entities — `camera.<name>` for the thumbnail and `camera.<name>_full_image` for the full-resolution image. To request a fresh image, call the **`verisure_owa.capture_image`** service on a camera entity from an automation, the Developer Tools, or the bundled camera card's refresh button. You can also target an area, device, floor or label: each camera takes one picture, even though the target reaches both of its entities. To leave a camera out, exclude both of its entities. The thumbnail entity exposes a `capturing` attribute (true while a request is in flight) so dashboards and automations can react to it.
+Each Verisure camera produces two entities — `camera.<name>` for the thumbnail and `camera.<name>_full_image` for the full-resolution image, which shows the thumbnail until the full-resolution image of the latest photo arrives. To request a fresh image, call the **`verisure_owa.capture_image`** service on a camera entity from an automation, the Developer Tools, or the bundled camera card's refresh button. You can also target an area, device, floor or label: each camera takes one picture, even though the target reaches both of its entities. To leave a camera out, exclude both of its entities. The thumbnail entity exposes a `capturing` attribute (true while a request is in flight) so dashboards and automations can react to it.
 
 Captures can take up to 30 seconds to appear, depending on how busy the API is — the integration waits for a frame strictly newer than the one being displayed before completing.
 

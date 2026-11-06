@@ -165,9 +165,12 @@ def _count_standalone_any(files: list[Path]) -> int:
                     count += 1
 
             # Check variable and class attribute annotations
-            elif isinstance(node, ast.AnnAssign):
-                if node.annotation and _is_standalone_any(node.annotation):
-                    count += 1
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and node.annotation
+                and _is_standalone_any(node.annotation)
+            ):
+                count += 1
 
     return count
 

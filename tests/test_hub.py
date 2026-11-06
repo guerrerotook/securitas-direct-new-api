@@ -1197,6 +1197,9 @@ class TestCaptureImage:
             coord = MagicMock()
             coord.installation = make_installation(number=number)
             coord.data = CameraData(thumbnails={}, full_images={})
+            coord.async_set_updated_data.side_effect = lambda data: setattr(
+                coord, "data", data
+            )
             return coord
 
         other = camera_coordinator("111")
@@ -1347,6 +1350,23 @@ class TestCaptureImage:
 class TestFullImageCapture:
     """Tests for full-resolution image fetching and storage in the hub."""
 
+    @staticmethod
+    def _make_camera_coordinator(
+        hub, installation, device, data, *, full_image_fetcher=None
+    ):
+        from custom_components.securitas.coordinators import CameraCoordinator
+
+        coord = CameraCoordinator(
+            hub.hass,
+            hub.client,
+            hub._api_queue,
+            installation,
+            cameras=[device],
+            full_image_fetcher=full_image_fetcher,
+        )
+        coord.data = data
+        return coord
+
     async def test_fetch_full_image_coalesces_concurrent_requests(self):
         """Two concurrent fetch_full_image calls for the same signal share one API call."""
         hub = make_hub()
@@ -1413,6 +1433,68 @@ class TestFullImageCapture:
         result = await asyncio.wait_for(task2, timeout=1.0)
         assert result == b"\xff\xd8full-bytes"
 
+    async def test_poll_retry_joins_the_download_a_capture_has_in_flight(self):
+        """A poll retrying a capture's photo shares its request rather than repeating it.
+
+        The API queue runs one call at a time, so the poll meets the capture's
+        download only if that starts after the poll's own thumbnail request.
+        """
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        captured = make_thumbnail(
+            id_signal="captured",
+            signal_type="16",
+            timestamp="2026-03-11 10:01:00",
+        )
+        older = make_thumbnail(
+            id_signal="older", signal_type="16", timestamp="2026-03-11 10:00:00"
+        )
+        poll_reached_fetcher = asyncio.Event()
+        capture_downloads: list[asyncio.Task] = []
+
+        async def fetcher(*args, **kwargs):
+            poll_reached_fetcher.set()
+            return await hub.fetch_full_image(*args, **kwargs)
+
+        coord = self._make_camera_coordinator(
+            hub,
+            installation,
+            device,
+            CameraData(thumbnails={device.zone_id: older}),
+            full_image_fetcher=fetcher,
+        )
+        hub.hass.data = {DOMAIN: {"entry": {"camera_coordinator": coord}}}
+
+        async def capture_lands_during_thumbnail_request(*_args, **_kwargs):
+            hub._update_camera_coordinator_thumbnail(
+                installation.number, device.zone_id, captured
+            )
+            capture_downloads.append(
+                asyncio.create_task(
+                    hub._fetch_and_store_full_image(installation, device, captured)
+                )
+            )
+            await asyncio.sleep(0)
+            return older
+
+        async def slow_get_full_image(*_args, **_kwargs):
+            await poll_reached_fetcher.wait()
+            return b"\xff\xd8captured"
+
+        hub.client.get_thumbnail = AsyncMock(
+            side_effect=capture_lands_during_thumbnail_request
+        )
+        hub.client.get_full_image = AsyncMock(side_effect=slow_get_full_image)
+
+        result = await coord._async_update_data()
+        await asyncio.wait_for(capture_downloads[0], timeout=1)
+
+        hub.client.get_full_image.assert_awaited_once()
+        assert result.full_image_signals[device.zone_id] == "captured"
+
     async def test_capture_updates_coordinator_full_image(self):
         """Camera coordinator is updated with full image after capture."""
         from custom_components.securitas.coordinators import CameraData
@@ -1440,7 +1522,9 @@ class TestFullImageCapture:
         mock_coord = MagicMock()
         mock_coord.installation = installation
         mock_coord.data = CameraData(thumbnails={}, full_images={})
-        mock_coord.async_set_updated_data = MagicMock()
+        mock_coord.async_set_updated_data = MagicMock(
+            side_effect=lambda data: setattr(mock_coord, "data", data)
+        )
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
 
         _tasks = []
@@ -1461,6 +1545,97 @@ class TestFullImageCapture:
         last_data = mock_coord.async_set_updated_data.call_args_list[-1][0][0]
         assert device.zone_id in last_data.full_images
         assert last_data.full_images[device.zone_id] == full_jpeg
+        assert last_data.full_image_signals[device.zone_id] == new_thumb.id_signal
+
+    async def test_older_photo_download_keeps_the_newer_full_image(self):
+        """A download landing after a newer photo must not replace that photo's image."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        older = make_thumbnail(
+            id_signal="older", signal_type="16", timestamp="2026-03-11 10:00:00"
+        )
+        newer = make_thumbnail(
+            id_signal="newer", signal_type="16", timestamp="2026-03-11 10:01:00"
+        )
+        coord = self._make_camera_coordinator(
+            hub,
+            installation,
+            device,
+            CameraData(
+                thumbnails={device.zone_id: newer},
+                full_images={device.zone_id: b"\xff\xd8newer"},
+                full_image_signals={device.zone_id: "newer"},
+            ),
+        )
+        hub.hass.data = {DOMAIN: {"entry": {"camera_coordinator": coord}}}
+        hub.client.get_full_image = AsyncMock(return_value=b"\xff\xd8older")
+
+        await hub._fetch_and_store_full_image(installation, device, older)
+
+        hub.client.get_full_image.assert_awaited_once()
+        assert coord.data.full_images[device.zone_id] == b"\xff\xd8newer"
+        assert coord.data.full_image_signals[device.zone_id] == "newer"
+
+    async def test_full_image_needs_its_thumbnail_in_each_coordinator(self):
+        """Two entries can hold one installation; only the one showing the photo stores it."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        photo = make_thumbnail(id_signal="photo", signal_type="16")
+        showing = self._make_camera_coordinator(
+            hub,
+            installation,
+            device,
+            CameraData(thumbnails={device.zone_id: photo}),
+        )
+        no_thumbnail = self._make_camera_coordinator(
+            hub, installation, device, CameraData()
+        )
+        hub.hass.data = {
+            DOMAIN: {
+                "showing": {"camera_coordinator": showing},
+                "no_thumbnail": {"camera_coordinator": no_thumbnail},
+            }
+        }
+
+        hub._update_camera_coordinator_full_image(
+            installation.number, device.zone_id, b"\xff\xd8photo", "photo"
+        )
+
+        assert showing.data.full_images == {device.zone_id: b"\xff\xd8photo"}
+        assert showing.data.full_image_signals == {device.zone_id: "photo"}
+        assert no_thumbnail.data.full_images == {}
+        assert no_thumbnail.data.full_image_signals == {}
+
+    def test_thumbnail_update_keeps_the_record_of_held_full_images(self):
+        """A captured thumbnail must not lose which photo each full image shows."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation()
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        hub.config_entry = mock_entry
+        coord = MagicMock()
+        coord.installation = installation
+        coord.data = CameraData(
+            thumbnails={},
+            full_images={"other": b"\xff\xd8"},
+            full_image_signals={"other": "held"},
+        )
+        hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": coord}}}
+
+        hub._update_camera_coordinator_thumbnail(
+            installation.number, "zone", make_thumbnail(id_signal="new")
+        )
+
+        written = coord.async_set_updated_data.call_args[0][0]
+        assert written.full_image_signals == {"other": "held"}
 
     async def test_capture_skips_full_image_when_id_signal_is_none(self):
         """PIR cameras (idSignal=None) do not trigger a get_full_image call."""

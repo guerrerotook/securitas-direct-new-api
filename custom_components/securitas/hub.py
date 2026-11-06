@@ -5,6 +5,7 @@ import base64
 import hashlib
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -565,7 +566,7 @@ class VerisureHub:
         camera_device: CameraDevice,
         thumbnail: ThumbnailResponse,
     ) -> None:
-        """Fetch the full-resolution photo and store it, then notify the frontend."""
+        """Fetch the full-resolution photo and store it if it is still the latest."""
         if not thumbnail.id_signal or not thumbnail.signal_type:
             return
         try:
@@ -587,7 +588,10 @@ class VerisureHub:
             return
 
         self._update_camera_coordinator_full_image(
-            installation.number, camera_device.zone_id, full_bytes
+            installation.number,
+            camera_device.zone_id,
+            full_bytes,
+            thumbnail.id_signal,
         )
 
     def _validate_and_store_image(
@@ -623,7 +627,7 @@ class VerisureHub:
         Searched across entries: the hub is shared by every entry on the
         account, and ``config_entry`` is only the one that signed in first.
         Two entries can hold the same installation, and only one of them
-        owns the camera entities, so every match gets the update.
+        owns the camera entities, so every match is returned.
         """
         coords = []
         for entry_data in self.hass.data.get(DOMAIN, {}).values():
@@ -644,27 +648,34 @@ class VerisureHub:
         """Push a new thumbnail into the installation's CameraCoordinators."""
         if thumbnail is None:
             return
-        from .coordinators import CameraData
 
         for camera_coord in self._camera_coordinators(installation_number):
+            data = camera_coord.data
             camera_coord.async_set_updated_data(
-                CameraData(
-                    thumbnails={**camera_coord.data.thumbnails, zone_id: thumbnail},
-                    full_images=dict(camera_coord.data.full_images),
-                )
+                replace(data, thumbnails={**data.thumbnails, zone_id: thumbnail})
             )
 
     def _update_camera_coordinator_full_image(
-        self, installation_number: str, zone_id: str, full_bytes: bytes
+        self,
+        installation_number: str,
+        zone_id: str,
+        full_bytes: bytes,
+        id_signal: str,
     ) -> None:
-        """Push a new full-resolution image into the installation's CameraCoordinators."""
-        from .coordinators import CameraData
-
+        """Store a full image in each CameraCoordinator whose latest thumbnail it shows."""
         for camera_coord in self._camera_coordinators(installation_number):
+            data = camera_coord.data
+            thumbnail = data.thumbnails.get(zone_id)
+            if thumbnail is None or thumbnail.id_signal != id_signal:
+                continue
             camera_coord.async_set_updated_data(
-                CameraData(
-                    thumbnails=dict(camera_coord.data.thumbnails),
-                    full_images={**camera_coord.data.full_images, zone_id: full_bytes},
+                replace(
+                    data,
+                    full_images={**data.full_images, zone_id: full_bytes},
+                    full_image_signals={
+                        **data.full_image_signals,
+                        zone_id: id_signal,
+                    },
                 )
             )
 

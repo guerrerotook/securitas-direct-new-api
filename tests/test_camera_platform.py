@@ -657,6 +657,101 @@ class TestVerisureCameraFull:
         result = await cam.async_camera_image()
         assert result == placeholder_bytes
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("full_images", "full_signals", "thumb_signal", "thumb_image", "expected"),
+        [
+            pytest.param(
+                {"QR10": b"\xff\xd8full"},
+                {"QR10": "sig"},
+                "sig",
+                b"\xff\xd8thumb",
+                b"\xff\xd8full",
+                id="full image of the latest photo wins",
+            ),
+            pytest.param(
+                {},
+                {},
+                "sig",
+                b"\xff\xd8thumb",
+                b"\xff\xd8thumb",
+                id="thumbnail stands in when no full image is held",
+            ),
+            pytest.param(
+                {"QR10": b"\xff\xd8older"},
+                {"QR10": "older"},
+                "sig",
+                b"\xff\xd8thumb",
+                b"\xff\xd8thumb",
+                id="thumbnail beats a full image of an older photo",
+            ),
+            pytest.param(
+                {"QR10": b"\xff\xd8older"},
+                {"QR10": "older"},
+                "sig",
+                b"not-a-jpeg",
+                b"\xff\xd8older",
+                id="older full image beats an unusable thumbnail",
+            ),
+            pytest.param(
+                {"QR10": b"\xff\xd8full"},
+                {"QR10": "sig"},
+                None,
+                b"\xff\xd8thumb",
+                b"\xff\xd8full",
+                id="full image is kept when the thumbnail names no photo",
+            ),
+        ],
+    )
+    async def test_camera_image_picks_the_best_available_image(
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        full_images,
+        full_signals,
+        thumb_signal,
+        thumb_image,
+        expected,
+    ):
+        from custom_components.securitas.camera import VerisureCameraFull
+
+        mock_coordinator.data = CameraData(
+            thumbnails={
+                "QR10": ThumbnailResponse(
+                    id_signal=thumb_signal,
+                    image=base64.b64encode(thumb_image).decode(),
+                )
+            },
+            full_images=full_images,
+            full_image_signals=full_signals,
+        )
+        cam = VerisureCameraFull(
+            mock_coordinator, mock_hub, installation, camera_device
+        )
+        assert await cam.async_camera_image() == expected
+
+    @pytest.mark.asyncio
+    async def test_camera_image_returns_placeholder_when_nothing_is_usable(
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        placeholder_bytes,
+    ):
+        from custom_components.securitas.camera import VerisureCameraFull
+
+        mock_coordinator.data = CameraData(
+            thumbnails={"QR10": ThumbnailResponse(id_signal="sig", image="")},
+            full_images={},
+        )
+        cam = VerisureCameraFull(
+            mock_coordinator, mock_hub, installation, camera_device
+        )
+        assert await cam.async_camera_image() == placeholder_bytes
+
     def test_device_info_matches_thumbnail_entity(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):

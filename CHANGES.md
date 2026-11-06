@@ -4,6 +4,10 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.12.0
 
+### Fixed
+
+- **The full image camera showed a placeholder picture instead of the latest photo** ([#662](https://github.com/guerrerotook/securitas-direct-new-api/issues/662)): after a restart or reload, a `*_full_image` camera showed the placeholder if the latest photo was over an hour old, and also if a single download of the full image failed. Home Assistant now fetches the full image at the next refresh, tries up to three times for each photo, and shows the thumbnail until the full image arrives. The thumbnail also replaces an older full image, so the two cameras no longer show different photos. Thanks to [@pocharlies](https://github.com/pocharlies) for the report.
+
 ## v5.11.0
 
 ### Added
