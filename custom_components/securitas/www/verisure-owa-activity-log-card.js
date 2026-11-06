@@ -18,7 +18,7 @@
  *   title: "Recent activity"            # optional
  */
 
-import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js?v=40267799-5.12.0";
+import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js?v=40267799-5.13.0";
 
 // ── Translations ─────────────────────────────────────────────────────────────
 
