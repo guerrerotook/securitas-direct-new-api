@@ -302,7 +302,7 @@ Five `DataUpdateCoordinator` subclasses replace per-entity independent polling. 
 
 **`LockCoordinator`** — Fetches lock modes via `get_lock_modes()`. Returns `LockData`. Update interval is the user-configured `scan_interval`.
 
-**`CameraCoordinator`** — Fetches thumbnails for all cameras. Returns `CameraData` with `thumbnails` (per zone_id) and `full_images` (per zone_id). Fixed 30-minute interval. Individual camera failures are logged but don't fail the whole update — previous thumbnails are preserved. When a thumbnail's `id_signal` changes from the previous refresh, the coordinator automatically fetches the full-resolution image via `get_full_image()`. Thumbnails older than 1 hour are skipped for full-image fetch (they likely have no full image available on the CDN).
+**`CameraCoordinator`** — Fetches thumbnails for all cameras. Returns `CameraData` with `thumbnails` (per zone_id) and `full_images` (per zone_id). Fixed 30-minute interval. Individual camera failures are logged but don't fail the whole update — previous thumbnails are preserved. `CameraData.full_image_signals` records which photo each full image shows. When a zone's held full image isn't of the latest thumbnail's `id_signal` (a new photo, a restart emptied memory, or an earlier fetch failed), the coordinator fetches it via `get_full_image()`, with at most three attempts per photo since Verisure may no longer hold an old one.
 
 **`ActivityCoordinator`** — Fetches the panel's activity timeline via `get_activity()` (`xSActV2`) and merges it with the events Home Assistant added itself. Returns `ActivityData` with `events` and `new_events`: entries whose id it has not seen before, from a poll or from Home Assistant itself (it remembers the 500 most recently seen ids apart from the 30-row view, and never forgets an id in the latest poll or in Home Assistant's own store, so a row that drops out of one poll and comes back doesn't count as new), leaving out the panel's echoes of actions Home Assistant itself issued (marked `duplicate_of`). A refresh's `new_events` is always empty on the first fetch, which sets the baseline, and whenever polling is off (`update_interval is None`). An event Home Assistant adds itself through `inject_event()` is published as `new_events=[event]` whether polling is on or off. Polls every 60 seconds only when activity polling is enabled in the options; otherwise `update_interval` is `None` and it refreshes on demand, as when the activity-log card calls `refresh_activity_log`.
 
@@ -837,7 +837,7 @@ Two camera entity types per discovered camera, both using `CoordinatorEntity[Cam
 
 - **`VerisureCamera`** — Shows the last captured thumbnail image. `async_camera_image()` returns the decoded thumbnail from `self.coordinator.data.thumbnails[zone_id]`, or a placeholder JPEG if none exists. On `_handle_coordinator_update()`, rotates the access token so the frontend re-fetches.
 
-- **`VerisureCameraFull`** — Shows the last full-resolution image. `async_camera_image()` returns `self.coordinator.data.full_images[zone_id]`, or a placeholder JPEG if none exists.
+- **`VerisureCameraFull`** — Shows the sharpest image of the latest photo. `async_camera_image()` returns `self.coordinator.data.full_images[zone_id]` when `full_image_signals[zone_id]` says it shows the latest thumbnail's photo; otherwise the thumbnail, then an older full image, then a placeholder JPEG.
 
 Both entities are grouped under a per-camera child device (via `camera_device_info()`), linked to the installation device as parent via `via_device`.
 

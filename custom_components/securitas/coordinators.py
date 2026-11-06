@@ -14,7 +14,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal, NoReturn
 
 from homeassistant.config_entries import ConfigEntry
@@ -58,6 +58,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_SENTINEL_INTERVAL = timedelta(minutes=30)
 _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
+# Verisure may no longer hold an old photo, so a full image that won't arrive
+# must not cost a request on every poll for as long as that photo is the latest.
+_MAX_FULL_IMAGE_ATTEMPTS = 3
 _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
 # Ids seen on the activity timeline, kept apart from the 30-row view so a row
@@ -119,6 +122,8 @@ class CameraData:
 
     thumbnails: dict[str, ThumbnailResponse] = field(default_factory=dict)
     full_images: dict[str, bytes] = field(default_factory=dict)
+    # The id_signal of the photo each entry in full_images shows.
+    full_image_signals: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -688,6 +693,8 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         # poll-driven full-image requests share an in-flight cache with
         # capture-driven requests on the same camera.
         self._full_image_fetcher = full_image_fetcher
+        # Per zone: the id_signal last tried, and how many times.
+        self._full_image_attempts: dict[str, tuple[str, int]] = {}
 
     @property
     def installation(self) -> Installation:
@@ -733,16 +740,15 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
                     thumbnails[camera.zone_id] = previous.thumbnails[camera.zone_id]
         return thumbnails
 
-    @staticmethod
-    def _thumbnail_is_recent(
-        thumbnail: ThumbnailResponse, max_age_hours: int = 1
-    ) -> bool:
-        """Check if a thumbnail is recent enough to have a full image available."""
-        parsed = _parse_panel_time(thumbnail.timestamp)
-        if parsed is None:
+    def _claim_full_image_attempt(self, zone_id: str, id_signal: str) -> bool:
+        """Count an attempt at this photo's full image, or refuse once used up."""
+        tried_signal, attempts = self._full_image_attempts.get(zone_id, ("", 0))
+        if tried_signal != id_signal:
+            attempts = 0
+        if attempts >= _MAX_FULL_IMAGE_ATTEMPTS:
             return False
-        age = datetime.now(tz=UTC) - parsed.replace(tzinfo=UTC)
-        return age < timedelta(hours=max_age_hours)
+        self._full_image_attempts[zone_id] = (id_signal, attempts + 1)
+        return True
 
     async def _fetch_full_image(
         self,
@@ -751,13 +757,6 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
     ) -> bytes | None:
         """Fetch full-resolution image for a thumbnail, return bytes or None."""
         if not thumbnail.id_signal or not thumbnail.signal_type:
-            return None
-        if not self._thumbnail_is_recent(thumbnail):
-            _LOGGER.debug(
-                "Skipping full image for zone %s — thumbnail too old (%s)",
-                zone_id,
-                thumbnail.timestamp,
-            )
             return None
         try:
             if self._full_image_fetcher is not None:
@@ -792,7 +791,7 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         return full_bytes
 
     async def _async_update_data(self) -> CameraData:
-        """Fetch camera thumbnails and full images for any that changed."""
+        """Fetch camera thumbnails, and any full image not yet held."""
         previous = self.data
         fetched = await _fetch_with_session_recovery(
             self._client,
@@ -822,31 +821,36 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         # `current` (capture-stored) already has its matching full image
         # in current.full_images — copy it across; don't re-fetch.
         full_images: dict[str, bytes] = {}
+        full_image_signals: dict[str, str] = {}
         if current:
             full_images = dict(current.full_images)
+            full_image_signals = dict(current.full_image_signals)
 
-        # Fetch full images for thumbnails whose id_signal changed since
-        # the poll-start snapshot.  Skip zones where we kept the
-        # capture-stored thumbnail — that full image is already present.
-        prev_thumbnails = previous.thumbnails if previous else {}
+        # Skip zones where we kept the capture-stored thumbnail — the capture
+        # flow fetches that full image itself.
         for zone_id, thumb in thumbnails.items():
-            if zone_id in kept_from_current:
+            if (
+                zone_id in kept_from_current
+                or not thumb.id_signal
+                or thumb.id_signal == full_image_signals.get(zone_id)
+                or not self._claim_full_image_attempt(zone_id, thumb.id_signal)
+            ):
                 continue
-            prev_thumb = prev_thumbnails.get(zone_id)
-            prev_signal = prev_thumb.id_signal if prev_thumb else None
-            if thumb.id_signal and thumb.id_signal != prev_signal:
-                _LOGGER.debug(
-                    "Thumbnail changed for zone %s (id_signal %s -> %s), "
-                    "fetching full image",
-                    zone_id,
-                    prev_signal,
-                    thumb.id_signal,
-                )
-                full_bytes = await self._fetch_full_image(thumb, zone_id)
-                if full_bytes:
-                    full_images[zone_id] = full_bytes
+            _LOGGER.debug(
+                "Fetching full image for zone %s (id_signal %s)",
+                zone_id,
+                thumb.id_signal,
+            )
+            full_bytes = await self._fetch_full_image(thumb, zone_id)
+            if full_bytes:
+                full_images[zone_id] = full_bytes
+                full_image_signals[zone_id] = thumb.id_signal
 
-        return CameraData(thumbnails=thumbnails, full_images=full_images)
+        return CameraData(
+            thumbnails=thumbnails,
+            full_images=full_images,
+            full_image_signals=full_image_signals,
+        )
 
 
 # ── ActivityCoordinator ──────────────────────────────────────────────────────

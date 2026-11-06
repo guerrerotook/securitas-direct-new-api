@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, SIGNAL_CAMERA_STATE, VerisureHub
-from .coordinators import CameraCoordinator
+from .coordinators import CameraCoordinator, CameraData
 from .entity import camera_device_info
 from .events import inject_ha_event
 from .verisure_owa_api import Installation
@@ -68,8 +68,9 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
 
     Subclass-controlled mode: `_mode = "thumbnail"` reads
     `coordinator.data.thumbnails` and exposes the `capturing` state attribute
-    plus a SIGNAL_CAMERA_STATE listener; `_mode = "full"` reads
-    `coordinator.data.full_images` instead.
+    plus a SIGNAL_CAMERA_STATE listener; `_mode = "full"` prefers
+    `coordinator.data.full_images`, standing in the thumbnail while it holds
+    no full image of the latest photo.
     """
 
     _attr_should_poll = False
@@ -116,23 +117,37 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return the relevant image for this mode, or a placeholder."""
-        if self.coordinator.data is None:
+        data = self.coordinator.data
+        if data is None:
             return await _get_placeholder_image(self.hass)
-        if self._mode == "full":
-            image = self.coordinator.data.full_images.get(self._zone_id)
-            if image is None:
-                return await _get_placeholder_image(self.hass)
-            return image
-        thumb = self.coordinator.data.thumbnails.get(self._zone_id)
+        image = (
+            self._full_image(data)
+            if self._mode == "full"
+            else self._thumbnail_image(data)
+        )
+        return image or await _get_placeholder_image(self.hass)
+
+    def _thumbnail_image(self, data: CameraData) -> bytes | None:
+        """Return the decoded thumbnail, or None if it isn't a usable JPEG."""
+        thumb = data.thumbnails.get(self._zone_id)
         if thumb is None or not thumb.image:
-            return await _get_placeholder_image(self.hass)
+            return None
         try:
             image_bytes = base64.b64decode(thumb.image)
         except (ValueError, TypeError):
-            return await _get_placeholder_image(self.hass)
-        if not image_bytes.startswith(b"\xff\xd8"):
-            return await _get_placeholder_image(self.hass)
-        return image_bytes
+            return None
+        return image_bytes if image_bytes.startswith(b"\xff\xd8") else None
+
+    def _full_image(self, data: CameraData) -> bytes | None:
+        """Return the sharpest image of the latest photo, else an older full image."""
+        full = data.full_images.get(self._zone_id)
+        thumb = data.thumbnails.get(self._zone_id)
+        latest = thumb.id_signal if thumb else None
+        if full is not None and (
+            not latest or data.full_image_signals.get(self._zone_id) == latest
+        ):
+            return full
+        return self._thumbnail_image(data) or full
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[override]

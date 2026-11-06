@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1267,6 +1267,111 @@ class TestCameraCoordinator:
         result2 = await coord._async_update_data()
         assert result2.full_images["zone0"] == b"full-image-bytes"
         assert result2.thumbnails["zone0"] is thumb_new
+
+    def _full_image_coordinator(self) -> tuple[CameraCoordinator, AsyncMock]:
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(),
+            client,
+            _make_queue(),
+            _make_installation(),
+            self._make_cameras(1),
+        )
+        return coord, client
+
+    @staticmethod
+    def _photo(id_signal: str, timestamp: str | None = None) -> ThumbnailResponse:
+        now = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+        return ThumbnailResponse(
+            id_signal=id_signal,
+            signal_type="16",
+            image="b64",
+            timestamp=timestamp or now,
+        )
+
+    @staticmethod
+    async def _poll(coord: CameraCoordinator) -> CameraData:
+        coord.data = await coord._async_update_data()
+        return coord.data
+
+    @pytest.mark.asyncio
+    async def test_old_photo_fetched_on_first_poll_after_restart(self):
+        """A restart empties memory, so an old photo's full image is fetched again."""
+        coord, client = self._full_image_coordinator()
+        client.get_thumbnail.return_value = self._photo("sig", "2026-05-16 19:00:00")
+        client.get_full_image.return_value = b"\xff\xd8full"
+
+        result = await self._poll(coord)
+
+        assert result.full_images["zone0"] == b"\xff\xd8full"
+        assert result.full_image_signals["zone0"] == "sig"
+
+    @pytest.mark.asyncio
+    async def test_held_full_image_is_not_fetched_again(self):
+        """Once the latest photo's full image is held, polls make no more requests."""
+        coord, client = self._full_image_coordinator()
+        client.get_thumbnail.return_value = self._photo("sig")
+        client.get_full_image.return_value = b"\xff\xd8full"
+
+        await self._poll(coord)
+        await self._poll(coord)
+
+        assert client.get_full_image.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_full_image_fetch_is_retried_on_next_poll(self):
+        """One failed fetch doesn't leave the entity without a full image for good."""
+        coord, client = self._full_image_coordinator()
+        client.get_thumbnail.return_value = self._photo("sig")
+        client.get_full_image.side_effect = [None, b"\xff\xd8full"]
+
+        await self._poll(coord)
+        result = await self._poll(coord)
+
+        assert result.full_images["zone0"] == b"\xff\xd8full"
+
+    @pytest.mark.asyncio
+    async def test_unavailable_full_image_stops_being_requested(self):
+        """A photo Verisure won't supply costs three requests, not one per poll forever."""
+        coord, client = self._full_image_coordinator()
+        client.get_thumbnail.return_value = self._photo("sig")
+        client.get_full_image.return_value = None
+
+        for _ in range(6):
+            await self._poll(coord)
+
+        assert client.get_full_image.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_new_photo_gets_its_own_fetch_attempts(self):
+        """Giving up on one photo doesn't stop the next photo being fetched."""
+        coord, client = self._full_image_coordinator()
+        client.get_thumbnail.return_value = self._photo("first")
+        client.get_full_image.return_value = None
+        for _ in range(3):
+            await self._poll(coord)
+
+        client.get_thumbnail.return_value = self._photo("second")
+        client.get_full_image.return_value = b"\xff\xd8second"
+        result = await self._poll(coord)
+
+        assert result.full_images["zone0"] == b"\xff\xd8second"
+        assert result.full_image_signals["zone0"] == "second"
+
+    @pytest.mark.asyncio
+    async def test_failed_fetch_keeps_previous_image_marked_as_previous_photo(self):
+        """The old image stays labelled as the old photo, so it isn't taken for the new one."""
+        coord, client = self._full_image_coordinator()
+        client.get_thumbnail.return_value = self._photo("first")
+        client.get_full_image.return_value = b"\xff\xd8first"
+        await self._poll(coord)
+
+        client.get_thumbnail.return_value = self._photo("second")
+        client.get_full_image.return_value = None
+        result = await self._poll(coord)
+
+        assert result.full_images["zone0"] == b"\xff\xd8first"
+        assert result.full_image_signals["zone0"] == "first"
 
     @pytest.mark.asyncio
     async def test_session_expired_retries(self):

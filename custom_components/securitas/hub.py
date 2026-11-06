@@ -5,6 +5,7 @@ import base64
 import hashlib
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -587,7 +588,10 @@ class VerisureHub:
             return
 
         self._update_camera_coordinator_full_image(
-            installation.number, camera_device.zone_id, full_bytes
+            installation.number,
+            camera_device.zone_id,
+            full_bytes,
+            thumbnail.id_signal,
         )
 
     def _validate_and_store_image(
@@ -644,27 +648,31 @@ class VerisureHub:
         """Push a new thumbnail into the installation's CameraCoordinators."""
         if thumbnail is None:
             return
-        from .coordinators import CameraData
 
         for camera_coord in self._camera_coordinators(installation_number):
+            data = camera_coord.data
             camera_coord.async_set_updated_data(
-                CameraData(
-                    thumbnails={**camera_coord.data.thumbnails, zone_id: thumbnail},
-                    full_images=dict(camera_coord.data.full_images),
-                )
+                replace(data, thumbnails={**data.thumbnails, zone_id: thumbnail})
             )
 
     def _update_camera_coordinator_full_image(
-        self, installation_number: str, zone_id: str, full_bytes: bytes
+        self,
+        installation_number: str,
+        zone_id: str,
+        full_bytes: bytes,
+        id_signal: str,
     ) -> None:
         """Push a new full-resolution image into the installation's CameraCoordinators."""
-        from .coordinators import CameraData
-
         for camera_coord in self._camera_coordinators(installation_number):
+            data = camera_coord.data
             camera_coord.async_set_updated_data(
-                CameraData(
-                    thumbnails=dict(camera_coord.data.thumbnails),
-                    full_images={**camera_coord.data.full_images, zone_id: full_bytes},
+                replace(
+                    data,
+                    full_images={**data.full_images, zone_id: full_bytes},
+                    full_image_signals={
+                        **data.full_image_signals,
+                        zone_id: id_signal,
+                    },
                 )
             )
 

@@ -1461,6 +1461,32 @@ class TestFullImageCapture:
         last_data = mock_coord.async_set_updated_data.call_args_list[-1][0][0]
         assert device.zone_id in last_data.full_images
         assert last_data.full_images[device.zone_id] == full_jpeg
+        assert last_data.full_image_signals[device.zone_id] == new_thumb.id_signal
+
+    def test_thumbnail_update_keeps_the_record_of_held_full_images(self):
+        """A captured thumbnail must not lose which photo each full image shows."""
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation()
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        hub.config_entry = mock_entry
+        coord = MagicMock()
+        coord.installation = installation
+        coord.data = CameraData(
+            thumbnails={},
+            full_images={"other": b"\xff\xd8"},
+            full_image_signals={"other": "held"},
+        )
+        hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": coord}}}
+
+        hub._update_camera_coordinator_thumbnail(
+            installation.number, "zone", ThumbnailResponse(id_signal="new")
+        )
+
+        written = coord.async_set_updated_data.call_args[0][0]
+        assert written.full_image_signals == {"other": "held"}
 
     async def test_capture_skips_full_image_when_id_signal_is_none(self):
         """PIR cameras (idSignal=None) do not trigger a get_full_image call."""
