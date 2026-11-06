@@ -61,6 +61,9 @@ _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
 # Verisure may no longer hold an old photo, so a full image that won't arrive
 # must not cost a request on every poll for as long as that photo is the latest.
 _MAX_FULL_IMAGE_ATTEMPTS = 3
+# How many photos each zone remembers attempts for: a photo the server serves
+# again must not get fresh attempts, but the record must not grow without limit.
+_MAX_FULL_IMAGE_PHOTOS_TRACKED = 16
 _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
 # Ids seen on the activity timeline, kept apart from the 30-row view so a row
@@ -693,8 +696,8 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         # poll-driven full-image requests share an in-flight cache with
         # capture-driven requests on the same camera.
         self._full_image_fetcher = full_image_fetcher
-        # Per zone: the id_signal last tried, and how many times.
-        self._full_image_attempts: dict[str, tuple[str, int]] = {}
+        # Per zone: how many times each id_signal has been tried, oldest first.
+        self._full_image_attempts: dict[str, dict[str, int]] = {}
 
     @property
     def installation(self) -> Installation:
@@ -742,13 +745,32 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
 
     def _claim_full_image_attempt(self, zone_id: str, id_signal: str) -> bool:
         """Count an attempt at this photo's full image, or refuse once used up."""
-        tried_signal, attempts = self._full_image_attempts.get(zone_id, ("", 0))
-        if tried_signal != id_signal:
-            attempts = 0
-        if attempts >= _MAX_FULL_IMAGE_ATTEMPTS:
+        attempts = self._full_image_attempts.setdefault(zone_id, {})
+        tried = attempts.get(id_signal, 0)
+        if tried >= _MAX_FULL_IMAGE_ATTEMPTS:
+            _LOGGER.debug(
+                "Giving up on full image for zone %s (id_signal %s) after %d attempts",
+                zone_id,
+                id_signal,
+                tried,
+            )
             return False
-        self._full_image_attempts[zone_id] = (id_signal, attempts + 1)
+        attempts[id_signal] = tried + 1
+        if len(attempts) > _MAX_FULL_IMAGE_PHOTOS_TRACKED:
+            del attempts[next(iter(attempts))]
         return True
+
+    @staticmethod
+    def _merge_thumbnails(
+        fetched: dict[str, ThumbnailResponse], current: CameraData | None
+    ) -> dict[str, ThumbnailResponse]:
+        """Overlay fetched thumbnails on `current`, keeping any strictly newer one."""
+        thumbnails = dict(current.thumbnails) if current else {}
+        for zone_id, fetched_thumb in fetched.items():
+            held = thumbnails.get(zone_id)
+            if held is None or not _thumbnail_is_strictly_newer(held, fetched_thumb):
+                thumbnails[zone_id] = fetched_thumb
+        return thumbnails
 
     async def _fetch_full_image(
         self,
@@ -799,40 +821,15 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
             "Camera",
         )
 
-        # Re-read self.data AFTER the fetch — a capture flow may have
-        # called async_set_updated_data() with a strictly newer thumbnail
-        # while we were awaiting get_thumbnail.  Without this merge the
-        # capture's fresh frame gets overwritten by whatever the CDN
-        # served the poll mid-flight (often an older cached frame).
-        current = self.data
-        thumbnails: dict[str, ThumbnailResponse] = {}
-        kept_from_current: set[str] = set()
-        for zone_id, fetched_thumb in fetched.items():
-            current_thumb = current.thumbnails.get(zone_id) if current else None
-            if current_thumb is not None and _thumbnail_is_strictly_newer(
-                current_thumb, fetched_thumb
-            ):
-                thumbnails[zone_id] = current_thumb
-                kept_from_current.add(zone_id)
-            else:
-                thumbnails[zone_id] = fetched_thumb
-
-        # Carry forward full images.  A zone whose thumbnail we kept from
-        # `current` (capture-stored) already has its matching full image
-        # in current.full_images — copy it across; don't re-fetch.
-        full_images: dict[str, bytes] = {}
-        full_image_signals: dict[str, str] = {}
-        if current:
-            full_images = dict(current.full_images)
-            full_image_signals = dict(current.full_image_signals)
-
-        # Skip zones where we kept the capture-stored thumbnail — the capture
-        # flow fetches that full image itself.
-        for zone_id, thumb in thumbnails.items():
+        downloaded: dict[str, tuple[str, bytes]] = {}
+        for zone_id in self._merge_thumbnails(fetched, self.data):
+            # Merged per zone: each download can let a capture publish a newer one.
+            thumb = self._merge_thumbnails(fetched, self.data)[zone_id]
             if (
-                zone_id in kept_from_current
-                or not thumb.id_signal
-                or thumb.id_signal == full_image_signals.get(zone_id)
+                not thumb.id_signal
+                or not thumb.signal_type
+                or thumb.id_signal
+                == (self.data.full_image_signals.get(zone_id) if self.data else None)
                 or not self._claim_full_image_attempt(zone_id, thumb.id_signal)
             ):
                 continue
@@ -843,8 +840,22 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
             )
             full_bytes = await self._fetch_full_image(thumb, zone_id)
             if full_bytes:
+                downloaded[zone_id] = (thumb.id_signal, full_bytes)
+
+        # Re-read self.data AFTER the fetches, with no await before the return
+        # — a capture flow may have called async_set_updated_data() with a
+        # strictly newer thumbnail, or that thumbnail's full image, while we
+        # were awaiting. Without this merge the capture's fresh frame gets
+        # overwritten by whatever the CDN served the poll mid-flight (often an
+        # older cached frame).
+        current = self.data
+        thumbnails = self._merge_thumbnails(fetched, current)
+        full_images = dict(current.full_images) if current else {}
+        full_image_signals = dict(current.full_image_signals) if current else {}
+        for zone_id, (id_signal, full_bytes) in downloaded.items():
+            if thumbnails[zone_id].id_signal == id_signal:
                 full_images[zone_id] = full_bytes
-                full_image_signals[zone_id] = thumb.id_signal
+                full_image_signals[zone_id] = id_signal
 
         return CameraData(
             thumbnails=thumbnails,

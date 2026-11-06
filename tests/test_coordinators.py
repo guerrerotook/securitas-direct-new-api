@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections import Counter
 from collections.abc import Coroutine
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,6 +20,8 @@ from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import DOMAIN, PROJECT_URL
 from custom_components.securitas.coordinators import (
     _ACTIVITY_SEEN_IDS_LIMIT,
+    _MAX_FULL_IMAGE_ATTEMPTS,
+    _MAX_FULL_IMAGE_PHOTOS_TRACKED,
     ActivityCoordinator,
     ActivityData,
     AlarmCoordinator,
@@ -1163,6 +1167,33 @@ class TestCameraCoordinator:
             cameras=cameras,
         )
 
+    def _make_full_image_coordinator(self) -> tuple[CameraCoordinator, AsyncMock]:
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(),
+            client,
+            _make_queue(),
+            _make_installation(),
+            self._make_cameras(1),
+        )
+        return coord, client
+
+    @staticmethod
+    def _make_photo(
+        id_signal: str, timestamp: str = "2026-05-16 19:00:00"
+    ) -> ThumbnailResponse:
+        return ThumbnailResponse(
+            id_signal=id_signal,
+            signal_type="16",
+            image="b64",
+            timestamp=timestamp,
+        )
+
+    @staticmethod
+    async def _poll(coord: CameraCoordinator) -> CameraData:
+        coord.data = await coord._async_update_data()
+        return coord.data
+
     @pytest.mark.asyncio
     async def test_successful_update(self):
         """Successful update returns CameraData with thumbnails."""
@@ -1268,37 +1299,11 @@ class TestCameraCoordinator:
         assert result2.full_images["zone0"] == b"full-image-bytes"
         assert result2.thumbnails["zone0"] is thumb_new
 
-    def _full_image_coordinator(self) -> tuple[CameraCoordinator, AsyncMock]:
-        client = _make_client()
-        coord = self._make_coordinator(
-            _make_hass(),
-            client,
-            _make_queue(),
-            _make_installation(),
-            self._make_cameras(1),
-        )
-        return coord, client
-
-    @staticmethod
-    def _photo(id_signal: str, timestamp: str | None = None) -> ThumbnailResponse:
-        now = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
-        return ThumbnailResponse(
-            id_signal=id_signal,
-            signal_type="16",
-            image="b64",
-            timestamp=timestamp or now,
-        )
-
-    @staticmethod
-    async def _poll(coord: CameraCoordinator) -> CameraData:
-        coord.data = await coord._async_update_data()
-        return coord.data
-
     @pytest.mark.asyncio
     async def test_old_photo_fetched_on_first_poll_after_restart(self):
         """A restart empties memory, so an old photo's full image is fetched again."""
-        coord, client = self._full_image_coordinator()
-        client.get_thumbnail.return_value = self._photo("sig", "2026-05-16 19:00:00")
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("sig")
         client.get_full_image.return_value = b"\xff\xd8full"
 
         result = await self._poll(coord)
@@ -1309,8 +1314,8 @@ class TestCameraCoordinator:
     @pytest.mark.asyncio
     async def test_held_full_image_is_not_fetched_again(self):
         """Once the latest photo's full image is held, polls make no more requests."""
-        coord, client = self._full_image_coordinator()
-        client.get_thumbnail.return_value = self._photo("sig")
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("sig")
         client.get_full_image.return_value = b"\xff\xd8full"
 
         await self._poll(coord)
@@ -1321,8 +1326,8 @@ class TestCameraCoordinator:
     @pytest.mark.asyncio
     async def test_failed_full_image_fetch_is_retried_on_next_poll(self):
         """One failed fetch doesn't leave the entity without a full image for good."""
-        coord, client = self._full_image_coordinator()
-        client.get_thumbnail.return_value = self._photo("sig")
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("sig")
         client.get_full_image.side_effect = [None, b"\xff\xd8full"]
 
         await self._poll(coord)
@@ -1332,26 +1337,26 @@ class TestCameraCoordinator:
 
     @pytest.mark.asyncio
     async def test_unavailable_full_image_stops_being_requested(self):
-        """A photo Verisure won't supply costs three requests, not one per poll forever."""
-        coord, client = self._full_image_coordinator()
-        client.get_thumbnail.return_value = self._photo("sig")
+        """A photo Verisure won't supply stops being requested once its attempts run out."""
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("sig")
         client.get_full_image.return_value = None
 
-        for _ in range(6):
+        for _ in range(_MAX_FULL_IMAGE_ATTEMPTS * 2):
             await self._poll(coord)
 
-        assert client.get_full_image.await_count == 3
+        assert client.get_full_image.await_count == _MAX_FULL_IMAGE_ATTEMPTS
 
     @pytest.mark.asyncio
     async def test_new_photo_gets_its_own_fetch_attempts(self):
         """Giving up on one photo doesn't stop the next photo being fetched."""
-        coord, client = self._full_image_coordinator()
-        client.get_thumbnail.return_value = self._photo("first")
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("first")
         client.get_full_image.return_value = None
-        for _ in range(3):
+        for _ in range(_MAX_FULL_IMAGE_ATTEMPTS):
             await self._poll(coord)
 
-        client.get_thumbnail.return_value = self._photo("second")
+        client.get_thumbnail.return_value = self._make_photo("second")
         client.get_full_image.return_value = b"\xff\xd8second"
         result = await self._poll(coord)
 
@@ -1361,17 +1366,312 @@ class TestCameraCoordinator:
     @pytest.mark.asyncio
     async def test_failed_fetch_keeps_previous_image_marked_as_previous_photo(self):
         """The old image stays labelled as the old photo, so it isn't taken for the new one."""
-        coord, client = self._full_image_coordinator()
-        client.get_thumbnail.return_value = self._photo("first")
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("first")
         client.get_full_image.return_value = b"\xff\xd8first"
         await self._poll(coord)
 
-        client.get_thumbnail.return_value = self._photo("second")
+        client.get_thumbnail.return_value = self._make_photo("second")
         client.get_full_image.return_value = None
         result = await self._poll(coord)
 
         assert result.full_images["zone0"] == b"\xff\xd8first"
         assert result.full_image_signals["zone0"] == "first"
+
+    @pytest.mark.asyncio
+    async def test_kept_capture_thumbnail_retries_its_full_image(self):
+        """A capture whose background download failed is retried while the server lags."""
+        coord, client = self._make_full_image_coordinator()
+        captured = self._make_photo("captured", "2026-05-16 20:00:00")
+        coord.data = CameraData(thumbnails={"zone0": captured})
+        client.get_thumbnail.return_value = self._make_photo("older")
+        client.get_full_image.return_value = b"\xff\xd8captured"
+
+        result = await self._poll(coord)
+
+        assert result.thumbnails["zone0"] is captured
+        assert result.full_images["zone0"] == b"\xff\xd8captured"
+        assert result.full_image_signals["zone0"] == "captured"
+
+    @pytest.mark.asyncio
+    async def test_capture_finished_during_full_image_download_survives(self):
+        """The poll's older photo must not replace a capture published mid-download."""
+        coord, client = self._make_full_image_coordinator()
+        older = self._make_photo("older")
+        captured = self._make_photo("captured", "2026-05-16 20:00:00")
+        coord.data = CameraData(thumbnails={"zone0": older})
+        client.get_thumbnail.return_value = older
+
+        async def _capture_lands(*_args: Any) -> bytes:
+            coord.data = CameraData(
+                thumbnails={"zone0": captured},
+                full_images={"zone0": b"\xff\xd8captured"},
+                full_image_signals={"zone0": "captured"},
+            )
+            return b"\xff\xd8older"
+
+        client.get_full_image.side_effect = _capture_lands
+
+        result = await coord._async_update_data()
+
+        assert result.thumbnails["zone0"] is captured
+        assert result.full_images["zone0"] == b"\xff\xd8captured"
+        assert result.full_image_signals["zone0"] == "captured"
+
+    @pytest.mark.asyncio
+    async def test_download_of_superseded_photo_is_not_stored(self):
+        """With only the capture's thumbnail in, the older download still can't be held."""
+        coord, client = self._make_full_image_coordinator()
+        older = self._make_photo("older")
+        captured = self._make_photo("captured", "2026-05-16 20:00:00")
+        coord.data = CameraData(thumbnails={"zone0": older})
+        client.get_thumbnail.return_value = older
+
+        async def _thumbnail_lands(*_args: Any) -> bytes:
+            coord.data = CameraData(thumbnails={"zone0": captured})
+            return b"\xff\xd8older"
+
+        client.get_full_image.side_effect = _thumbnail_lands
+
+        result = await coord._async_update_data()
+
+        assert result.thumbnails["zone0"] is captured
+        assert result.full_images == {}
+        assert result.full_image_signals == {}
+
+    @pytest.mark.asyncio
+    async def test_capture_on_another_zone_during_download_survives(self):
+        """A download for one zone is kept and doesn't undo a capture on another."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(),
+            client,
+            _make_queue(),
+            _make_installation(),
+            self._make_cameras(2),
+        )
+        older = self._make_photo("older")
+        captured = self._make_photo("captured", "2026-05-16 20:00:00")
+        coord.data = CameraData(
+            thumbnails={"zone0": older, "zone1": older},
+            full_images={"zone1": b"\xff\xd8older"},
+            full_image_signals={"zone1": "older"},
+        )
+        client.get_thumbnail.return_value = older
+
+        async def _capture_lands(*_args: Any) -> bytes:
+            coord.data = CameraData(
+                thumbnails={"zone0": older, "zone1": captured},
+                full_images={"zone1": b"\xff\xd8captured"},
+                full_image_signals={"zone1": "captured"},
+            )
+            return b"\xff\xd8older"
+
+        client.get_full_image.side_effect = _capture_lands
+
+        result = await coord._async_update_data()
+
+        assert result.full_images == {
+            "zone0": b"\xff\xd8older",
+            "zone1": b"\xff\xd8captured",
+        }
+        assert result.full_image_signals == {"zone0": "older", "zone1": "captured"}
+        assert result.thumbnails["zone1"] is captured
+
+    @pytest.mark.asyncio
+    async def test_full_image_stored_during_another_zones_download_is_not_refetched(
+        self,
+    ):
+        """A zone's full image arriving mid-loop costs it no request and no attempt."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(),
+            client,
+            _make_queue(),
+            _make_installation(),
+            self._make_cameras(2),
+        )
+        photo0 = self._make_photo("photo0")
+        photo1 = self._make_photo("photo1")
+        coord.data = CameraData(thumbnails={"zone0": photo0, "zone1": photo1})
+        client.get_thumbnail.side_effect = [photo0, photo1]
+
+        async def _capture_stores_zone1(*_args: Any) -> bytes:
+            coord.data = CameraData(
+                thumbnails={"zone0": photo0, "zone1": photo1},
+                full_images={"zone1": b"\xff\xd8photo1"},
+                full_image_signals={"zone1": "photo1"},
+            )
+            return b"\xff\xd8photo0"
+
+        client.get_full_image.side_effect = _capture_stores_zone1
+
+        result = await coord._async_update_data()
+
+        requested = [call.args[1] for call in client.get_full_image.await_args_list]
+        assert requested == ["photo0"]
+        assert coord._full_image_attempts == {"zone0": {"photo0": 1}}
+        assert result.full_images == {
+            "zone0": b"\xff\xd8photo0",
+            "zone1": b"\xff\xd8photo1",
+        }
+        assert result.full_image_signals == {"zone0": "photo0", "zone1": "photo1"}
+
+    @pytest.mark.asyncio
+    async def test_newer_thumbnail_published_during_another_zones_download_is_used(
+        self,
+    ):
+        """A zone's download goes to the photo that is latest when the loop reaches it."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(),
+            client,
+            _make_queue(),
+            _make_installation(),
+            self._make_cameras(2),
+        )
+        photo0 = self._make_photo("photo0")
+        older = self._make_photo("older")
+        captured = self._make_photo("captured", "2026-05-16 20:00:00")
+        coord.data = CameraData(thumbnails={"zone0": photo0, "zone1": older})
+        client.get_thumbnail.side_effect = [photo0, older]
+
+        async def _capture_publishes_zone1(_inst: Any, id_signal: str, _type: Any):
+            if id_signal == "photo0":
+                coord.data = CameraData(thumbnails={"zone0": photo0, "zone1": captured})
+            return b"\xff\xd8" + id_signal.encode()
+
+        client.get_full_image.side_effect = _capture_publishes_zone1
+
+        result = await coord._async_update_data()
+
+        requested = [call.args[1] for call in client.get_full_image.await_args_list]
+        assert requested == ["photo0", "captured"]
+        assert coord._full_image_attempts == {
+            "zone0": {"photo0": 1},
+            "zone1": {"captured": 1},
+        }
+        assert result.thumbnails["zone1"] is captured
+        assert result.full_images == {
+            "zone0": b"\xff\xd8photo0",
+            "zone1": b"\xff\xd8captured",
+        }
+        assert result.full_image_signals == {"zone0": "photo0", "zone1": "captured"}
+
+    @pytest.mark.asyncio
+    async def test_capture_survives_when_that_zone_has_no_fetched_thumbnail(self):
+        """A zone the poll got nothing for keeps a thumbnail published mid-poll."""
+        coord, client = self._make_full_image_coordinator()
+        captured = self._make_photo("captured")
+        coord.data = CameraData()
+
+        async def _capture_lands_then_fail(*_args: Any) -> ThumbnailResponse:
+            coord.data = CameraData(thumbnails={"zone0": captured})
+            raise VerisureOwaError("camera error")
+
+        client.get_thumbnail.side_effect = _capture_lands_then_fail
+        client.get_full_image.return_value = None
+
+        result = await coord._async_update_data()
+
+        assert result.thumbnails["zone0"] is captured
+
+    @pytest.mark.asyncio
+    async def test_thumbnail_without_signal_type_spends_no_attempts(self):
+        """Polls that can't request the photo leave its attempts for when they can."""
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = ThumbnailResponse(
+            id_signal="sig", signal_type=None, image="b64"
+        )
+        for _ in range(_MAX_FULL_IMAGE_ATTEMPTS):
+            await self._poll(coord)
+
+        client.get_thumbnail.return_value = self._make_photo("sig")
+        client.get_full_image.return_value = b"\xff\xd8full"
+        result = await self._poll(coord)
+
+        assert result.full_images["zone0"] == b"\xff\xd8full"
+        client.get_full_image.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_returning_photo_keeps_its_attempt_count(self):
+        """Responses alternating between two photos stay within each photo's limit."""
+        coord, client = self._make_full_image_coordinator()
+        client.get_full_image.return_value = None
+
+        for signal in ["a", "b"] * 5:
+            client.get_thumbnail.return_value = self._make_photo(signal)
+            await self._poll(coord)
+
+        requested = Counter(
+            call.args[1] for call in client.get_full_image.await_args_list
+        )
+        assert requested == {
+            "a": _MAX_FULL_IMAGE_ATTEMPTS,
+            "b": _MAX_FULL_IMAGE_ATTEMPTS,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("newer_photos", "first_photo_requests"),
+        [
+            pytest.param(
+                _MAX_FULL_IMAGE_PHOTOS_TRACKED - 1,
+                _MAX_FULL_IMAGE_ATTEMPTS,
+                id="still remembered at the limit",
+            ),
+            pytest.param(
+                _MAX_FULL_IMAGE_PHOTOS_TRACKED,
+                _MAX_FULL_IMAGE_ATTEMPTS + 1,
+                id="oldest forgotten past the limit",
+            ),
+        ],
+    )
+    async def test_attempt_record_forgets_the_oldest_photo(
+        self, newer_photos: int, first_photo_requests: int
+    ):
+        """Each zone remembers a limited number of photos, dropping the oldest first."""
+        coord, client = self._make_full_image_coordinator()
+        client.get_full_image.return_value = None
+        client.get_thumbnail.return_value = self._make_photo("first")
+        for _ in range(_MAX_FULL_IMAGE_ATTEMPTS):
+            await self._poll(coord)
+        for number in range(newer_photos):
+            client.get_thumbnail.return_value = self._make_photo(f"newer{number}")
+            await self._poll(coord)
+        assert len(coord._full_image_attempts["zone0"]) <= (
+            _MAX_FULL_IMAGE_PHOTOS_TRACKED
+        )
+
+        client.get_thumbnail.return_value = self._make_photo("first")
+        await self._poll(coord)
+
+        requested = Counter(
+            call.args[1] for call in client.get_full_image.await_args_list
+        )
+        assert requested["first"] == first_photo_requests
+
+    @pytest.mark.asyncio
+    async def test_giving_up_on_a_photo_is_logged(self, caplog):
+        """Support relies on debug logs, so the refusal names the zone and the photo."""
+        coord, client = self._make_full_image_coordinator()
+        client.get_thumbnail.return_value = self._make_photo("sig")
+        client.get_full_image.return_value = None
+
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.securitas.coordinators"
+        ):
+            for _ in range(_MAX_FULL_IMAGE_ATTEMPTS):
+                await self._poll(coord)
+            assert "Giving up" not in caplog.text
+
+            await self._poll(coord)
+
+        refusals = [r for r in caplog.records if "Giving up" in r.getMessage()]
+        assert len(refusals) == 1
+        assert refusals[0].levelno == logging.DEBUG
+        assert "zone0" in refusals[0].getMessage()
+        assert "sig" in refusals[0].getMessage()
 
     @pytest.mark.asyncio
     async def test_session_expired_retries(self):
@@ -1448,7 +1748,8 @@ class TestCameraCoordinator:
 
         With the fix in place, the poll's write merges per-zone: a fetched
         thumbnail strictly older than what's currently in self.data is
-        dropped in favour of the existing one (and its full image too).
+        dropped in favour of the existing one, and a full image already held
+        for it is kept, not fetched again.
         """
         hass = _make_hass()
         client = _make_client()
@@ -1466,6 +1767,7 @@ class TestCameraCoordinator:
         # Capture-stored thumbnail (the user just clicked capture):
         capture_thumb = ThumbnailResponse(
             id_signal="from-capture",
+            signal_type="16",
             image="b64-fresh",
             timestamp="2026-05-16 20:50:04",
         )
@@ -1484,6 +1786,7 @@ class TestCameraCoordinator:
             coord.data = CameraData(
                 thumbnails={"zone0": capture_thumb},
                 full_images={"zone0": capture_full},
+                full_image_signals={"zone0": "from-capture"},
             )
             return stale_fetched
 
@@ -1498,6 +1801,8 @@ class TestCameraCoordinator:
         )
         # And its corresponding full image must be preserved, not refetched.
         assert result.full_images.get("zone0") == capture_full
+        assert result.full_image_signals.get("zone0") == "from-capture"
+        client.get_full_image.assert_not_awaited()
 
 
 # ── TestCoordinatorCapabilities ──────────────────────────────────────────────

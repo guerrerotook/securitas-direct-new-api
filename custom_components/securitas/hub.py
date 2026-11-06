@@ -566,7 +566,7 @@ class VerisureHub:
         camera_device: CameraDevice,
         thumbnail: ThumbnailResponse,
     ) -> None:
-        """Fetch the full-resolution photo and store it, then notify the frontend."""
+        """Fetch the full-resolution photo and store it if it is still the latest."""
         if not thumbnail.id_signal or not thumbnail.signal_type:
             return
         try:
@@ -627,7 +627,7 @@ class VerisureHub:
         Searched across entries: the hub is shared by every entry on the
         account, and ``config_entry`` is only the one that signed in first.
         Two entries can hold the same installation, and only one of them
-        owns the camera entities, so every match gets the update.
+        owns the camera entities, so every match is returned.
         """
         coords = []
         for entry_data in self.hass.data.get(DOMAIN, {}).values():
@@ -662,9 +662,12 @@ class VerisureHub:
         full_bytes: bytes,
         id_signal: str,
     ) -> None:
-        """Push a new full-resolution image into the installation's CameraCoordinators."""
+        """Store a full image in each CameraCoordinator whose latest thumbnail it shows."""
         for camera_coord in self._camera_coordinators(installation_number):
             data = camera_coord.data
+            thumbnail = data.thumbnails.get(zone_id)
+            if thumbnail is None or thumbnail.id_signal != id_signal:
+                continue
             camera_coord.async_set_updated_data(
                 replace(
                     data,
