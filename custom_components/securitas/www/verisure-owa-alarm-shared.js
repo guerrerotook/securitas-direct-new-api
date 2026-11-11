@@ -6,11 +6,11 @@
 // code — keeping the always-visible alarm chip fast to render on a cold
 // dashboard load.
 
-import { formatTranslation } from "./verisure-owa-card-utils.js?v=40267799-5.12.0";
+import { formatTranslation } from "./verisure-owa-card-utils.js?v=40267799-5.13.0";
 import {
   ARM_EXCEPTION_TRANSLATIONS,
   notifyActionFailure,
-} from "./verisure-owa-arm-exception.js?v=e76167ff-5.12.0";
+} from "./verisure-owa-arm-exception.js?v=e76167ff-5.13.0";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {
